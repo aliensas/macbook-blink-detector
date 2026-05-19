@@ -1344,3 +1344,228 @@ input[type="range"] {
     max-height: 120px;
   }
 }
+
+@media (orientation: landscape) and (max-height: 500px) and (max-width: 980px) {
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  #app {
+    height: 100vh;
+    height: 100svh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    padding:
+      max(6px, var(--safe-top))
+      max(10px, var(--safe-right))
+      max(8px, var(--safe-bottom))
+      max(10px, var(--safe-left));
+    gap: 8px;
+  }
+
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .eyebrow {
+    display: none;
+  }
+
+  h1 {
+    font-size: clamp(1rem, 2.2vw, 1.2rem);
+    line-height: 1.08;
+    overflow-wrap: anywhere;
+  }
+
+  .status-pill {
+    width: auto;
+    min-width: 78px;
+    min-height: 30px;
+    padding: 0 10px;
+    font-size: 0.74rem;
+  }
+
+  .workspace {
+    flex: 1 1 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1.04fr) minmax(286px, 0.96fr);
+    gap: 10px;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .camera-panel,
+  .control-panel {
+    min-height: 0;
+    max-height: none;
+  }
+
+  .camera-panel {
+    height: 100%;
+  }
+
+  .video-shell {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 126px;
+    aspect-ratio: auto;
+  }
+
+  .camera-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .camera-actions .primary-action,
+  .camera-actions .ghost-action {
+    min-height: 36px;
+    padding: 0 8px;
+    font-size: 0.78rem;
+  }
+
+  .icon-only {
+    width: 40px;
+    margin-left: 0;
+  }
+
+  .communication-panel {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .message-display {
+    gap: 4px;
+    padding: 8px 10px;
+  }
+
+  .message-display strong {
+    font-size: 1.05rem;
+  }
+
+  .code-buffer {
+    min-height: 22px;
+    padding: 0 9px;
+    font-size: 0.78rem;
+  }
+
+  .speech-actions {
+    display: grid;
+    grid-template-columns: repeat(3, 40px);
+    gap: 6px;
+  }
+
+  .speech-actions .compact-action {
+    min-height: 34px;
+    padding: 0;
+  }
+
+  .speech-actions .compact-action span {
+    display: none;
+  }
+
+  .control-panel {
+    height: 100%;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .metric-grid {
+    gap: 8px;
+  }
+
+  .metric {
+    min-height: 60px;
+    padding: 8px;
+  }
+
+  .metric-label {
+    margin-bottom: 5px;
+    font-size: 0.66rem;
+  }
+
+  .metric strong {
+    font-size: 1.18rem;
+  }
+
+  label,
+  .label-row,
+  .switch-row,
+  .signal-header {
+    font-size: 0.76rem;
+  }
+
+  select,
+  .primary-action,
+  .ghost-action {
+    min-height: 36px;
+  }
+
+  .signal-panel,
+  .gesture-panel {
+    gap: 8px;
+    padding-top: 10px;
+  }
+
+  .toggle-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .toggle-grid label {
+    min-height: 32px;
+    padding: 0 8px;
+    font-size: 0.72rem;
+  }
+
+  .calibration-panel {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .calibration-panel p {
+    font-size: 0.76rem;
+    line-height: 1.42;
+  }
+
+  .calibration-actions {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .calibration-actions .compact-action {
+    min-height: 34px;
+    padding: 0 6px;
+  }
+
+  .calibration-results {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .calibration-results span {
+    min-height: 28px;
+    padding: 0 8px;
+  }
+
+  .guided-test {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .guided-test .compact-action {
+    min-height: 34px;
+  }
+
+  .event-log {
+    min-height: 78px;
+    max-height: 120px;
+  }
+}
