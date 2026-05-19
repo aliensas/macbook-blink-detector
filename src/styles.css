@@ -1166,3 +1166,181 @@ input[type="range"] {
     grid-template-columns: 1fr;
   }
 }
+
+@media (max-width: 430px) and (min-height: 650px) {
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  #app {
+    height: 100vh;
+    height: 100svh;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    padding:
+      max(8px, var(--safe-top))
+      max(10px, var(--safe-right))
+      max(10px, var(--safe-bottom))
+      max(10px, var(--safe-left));
+    gap: 10px;
+  }
+
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .eyebrow {
+    display: none;
+  }
+
+  h1 {
+    font-size: 1.22rem;
+    line-height: 1.12;
+    overflow-wrap: anywhere;
+  }
+
+  .status-pill {
+    width: auto;
+    min-width: 82px;
+    min-height: 34px;
+    padding: 0 10px;
+    font-size: 0.78rem;
+  }
+
+  .workspace {
+    flex: 1 1 auto;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .camera-panel {
+    min-height: 0;
+    max-height: none;
+  }
+
+  .video-shell {
+    height: clamp(244px, 30dvh, 282px);
+    aspect-ratio: auto;
+  }
+
+  .camera-actions {
+    padding: 8px;
+  }
+
+  .camera-actions .primary-action,
+  .camera-actions .ghost-action {
+    min-height: 40px;
+    font-size: 0.82rem;
+  }
+
+  .communication-panel {
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .message-display {
+    gap: 4px;
+    padding: 8px 10px;
+  }
+
+  .message-display strong {
+    font-size: 1.18rem;
+  }
+
+  .code-buffer {
+    min-height: 24px;
+    padding: 0 10px;
+  }
+
+  .speech-actions .compact-action {
+    min-height: 36px;
+  }
+
+  .speech-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .control-panel {
+    max-height: none;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .metric {
+    min-height: 68px;
+    padding: 9px;
+  }
+
+  .metric-label {
+    margin-bottom: 6px;
+    font-size: 0.68rem;
+  }
+
+  .metric strong {
+    font-size: 1.28rem;
+  }
+
+  .signal-panel,
+  .gesture-panel {
+    gap: 8px;
+    padding-top: 10px;
+  }
+
+  .toggle-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .toggle-grid label {
+    min-height: 34px;
+    padding: 0 8px;
+    font-size: 0.76rem;
+  }
+
+  .calibration-panel {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .calibration-actions {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .calibration-actions .compact-action {
+    min-height: 36px;
+    padding: 0 6px;
+  }
+
+  .calibration-results {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .calibration-results span {
+    min-height: 30px;
+    padding: 0 8px;
+  }
+
+  .guided-test {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .guided-test .compact-action {
+    min-height: 36px;
+  }
+
+  .event-log {
+    min-height: 86px;
+    max-height: 120px;
+  }
+}
