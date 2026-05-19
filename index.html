@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MacBook Blink Detector</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">MacBook Camera</p>
+          <h1>眨眼检测</h1>
+        </div>
+        <div class="status-pill" id="runtimeStatus">
+          <span class="dot dot-idle"></span>
+          <span>待启动</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="camera-panel" aria-label="摄像头预览">
+          <div class="video-shell">
+            <video id="cameraVideo" playsinline muted></video>
+            <canvas id="overlayCanvas"></canvas>
+            <div class="video-empty" id="videoEmpty">
+              <i data-lucide="camera"></i>
+              <span>等待摄像头</span>
+            </div>
+          </div>
+          <div class="camera-actions">
+            <button class="primary-action" id="startButton" type="button" title="启动摄像头">
+              <i data-lucide="play"></i>
+              <span>启动</span>
+            </button>
+            <button class="ghost-action" id="stopButton" type="button" title="停止摄像头" disabled>
+              <i data-lucide="square"></i>
+              <span>停止</span>
+            </button>
+            <button class="ghost-action icon-only" id="resetButton" type="button" title="清零计数">
+              <i data-lucide="rotate-ccw"></i>
+            </button>
+          </div>
+        </section>
+
+        <aside class="control-panel" aria-label="检测控制">
+          <div class="metric-grid">
+            <div class="metric">
+              <span class="metric-label">眨眼</span>
+              <strong id="blinkCount">0</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">状态</span>
+              <strong id="blinkState">未检测</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">EAR</span>
+              <strong id="earValue">--</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">FPS</span>
+              <strong id="fpsValue">--</strong>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label for="cameraSelect">摄像头</label>
+            <select id="cameraSelect"></select>
+          </div>
+
+          <div class="control-group">
+            <div class="label-row">
+              <label for="thresholdRange">眨眼阈值</label>
+              <output id="thresholdValue" for="thresholdRange">0.22</output>
+            </div>
+            <input id="thresholdRange" type="range" min="0.14" max="0.34" value="0.22" step="0.01" />
+          </div>
+
+          <div class="control-group">
+            <div class="label-row">
+              <label for="holdFramesRange">闭眼帧数</label>
+              <output id="holdFramesValue" for="holdFramesRange">3</output>
+            </div>
+            <input id="holdFramesRange" type="range" min="2" max="8" value="3" step="1" />
+          </div>
+
+          <div class="switch-row">
+            <label class="switch">
+              <input id="overlayToggle" type="checkbox" checked />
+              <span></span>
+            </label>
+            <span>关键点</span>
+          </div>
+
+          <div class="signal-panel">
+            <div class="signal-header">
+              <span>眼睛开合</span>
+              <span id="confidenceLabel">--</span>
+            </div>
+            <div class="signal-track">
+              <div class="signal-fill" id="earBar"></div>
+            </div>
+          </div>
+
+          <div class="diagnostic-panel hidden" id="diagnosticPanel">
+            <div>
+              <strong id="diagnosticTitle">摄像头未启动</strong>
+              <p id="diagnosticMessage"></p>
+            </div>
+            <button class="ghost-action compact-action" id="copyUrlButton" type="button" title="复制本地地址">
+              <i data-lucide="copy"></i>
+              <span>复制地址</span>
+            </button>
+          </div>
+
+          <div class="event-log" id="eventLog" aria-live="polite"></div>
+        </aside>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
