@@ -1,3 +1,7 @@
+html {
+  height: 100%;
+}
+
 :root {
   color: #18202b;
   background: #eef2f6;
@@ -14,8 +18,9 @@
 
 body {
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 100%;
   margin: 0;
+  overflow: hidden;
   background:
     linear-gradient(135deg, rgba(45, 212, 191, 0.12), transparent 32%),
     linear-gradient(315deg, rgba(245, 158, 11, 0.14), transparent 30%),
@@ -33,13 +38,18 @@ button {
 }
 
 #app {
+  display: flex;
+  flex-direction: column;
   width: min(1440px, 100%);
-  min-height: 100vh;
+  height: 100vh;
+  height: 100svh;
   margin: 0 auto;
   padding: 24px;
+  overflow: hidden;
 }
 
 .topbar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -103,10 +113,12 @@ h1 {
 }
 
 .workspace {
+  flex: 1 1 auto;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
   gap: 18px;
-  align-items: start;
+  align-items: stretch;
+  min-height: 0;
 }
 
 .camera-panel,
@@ -118,13 +130,18 @@ h1 {
 }
 
 .camera-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 100%;
   overflow: hidden;
 }
 
 .video-shell {
   position: relative;
+  flex: 1 1 auto;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  min-height: 0;
   overflow: hidden;
   background: #121826;
 }
@@ -174,11 +191,56 @@ canvas {
 }
 
 .camera-actions {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 14px;
   background: #ffffff;
+}
+
+.communication-panel {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border-top: 1px solid #e2e8f0;
+  padding: 14px;
+  background: #ffffff;
+}
+
+.message-display {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.message-display strong {
+  color: #0f172a;
+  font-size: clamp(1.35rem, 2rem, 2rem);
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+}
+
+.code-buffer {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 28px;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0 10px;
+  background: #ecfeff;
+  color: #0f766e;
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.speech-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .primary-action,
@@ -242,8 +304,14 @@ button svg {
 
 .control-panel {
   display: grid;
+  max-height: 100%;
+  min-height: 0;
   gap: 16px;
+  align-content: start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px;
+  scrollbar-gutter: stable;
 }
 
 .metric-grid {
@@ -383,6 +451,176 @@ input[type="range"] {
   transition: width 90ms linear;
 }
 
+.gesture-panel {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 14px;
+}
+
+.gesture-header,
+.gesture-row {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+}
+
+.gesture-header {
+  grid-template-columns: auto minmax(0, 1fr);
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.gesture-header span:last-child {
+  justify-self: end;
+  color: #0f766e;
+  overflow-wrap: anywhere;
+}
+
+.gesture-bars {
+  display: grid;
+  gap: 8px;
+}
+
+.gesture-row {
+  grid-template-columns: minmax(72px, auto) minmax(0, 1fr) 42px;
+  min-height: 26px;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.gesture-row meter {
+  width: 100%;
+  height: 12px;
+}
+
+.gesture-row strong {
+  justify-self: end;
+  color: #0f172a;
+  font-size: 0.8rem;
+}
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.toggle-grid label {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  gap: 8px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.toggle-grid input {
+  accent-color: #0f766e;
+}
+
+.calibration-panel {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 14px;
+}
+
+.calibration-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.calibration-header span:last-child {
+  color: #0f766e;
+  overflow-wrap: anywhere;
+}
+
+.calibration-panel > strong {
+  color: #0f172a;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.calibration-panel p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.calibration-progress {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbe3ee;
+}
+
+.calibration-progress div {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: #0f766e;
+  transition: width 120ms ease;
+}
+
+.calibration-actions,
+.guided-test {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.calibration-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.calibration-results span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  padding: 0 9px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.calibration-results strong {
+  color: #0f172a;
+}
+
+.guided-test {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.guided-test select {
+  min-height: 36px;
+}
+
+.guided-test-status {
+  min-height: 20px;
+}
+
 .diagnostic-panel {
   display: grid;
   gap: 12px;
@@ -433,12 +671,34 @@ input[type="range"] {
 }
 
 @media (max-width: 980px) {
+  body {
+    overflow: auto;
+  }
+
   #app {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
     padding: 18px;
   }
 
   .workspace {
     grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .camera-panel {
+    max-height: none;
+  }
+
+  .video-shell {
+    flex: none;
+    aspect-ratio: 16 / 9;
+  }
+
+  .control-panel {
+    max-height: none;
+    overflow: visible;
   }
 }
 
@@ -465,6 +725,14 @@ input[type="range"] {
     flex-wrap: wrap;
   }
 
+  .communication-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .speech-actions {
+    justify-content: stretch;
+  }
+
   .primary-action,
   .ghost-action {
     flex: 1 1 120px;
@@ -473,5 +741,15 @@ input[type="range"] {
   .icon-only {
     flex: 0 0 42px;
     margin-left: 0;
+  }
+
+  .toggle-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .calibration-actions,
+  .calibration-results,
+  .guided-test {
+    grid-template-columns: 1fr;
   }
 }

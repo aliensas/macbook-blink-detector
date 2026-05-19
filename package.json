@@ -1,6 +1,6 @@
 {
-  "name": "macbook-blink-detector",
-  "version": "0.1.0",
+  "name": "als-facial-gesture-aac",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "scripts": {

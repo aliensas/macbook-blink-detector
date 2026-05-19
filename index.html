@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MacBook Blink Detector</title>
+    <title>ALS 面部微动作 AAC 输入原型</title>
   </head>
   <body>
     <div id="app">
       <header class="topbar">
         <div>
-          <p class="eyebrow">MacBook Camera</p>
-          <h1>眨眼检测</h1>
+          <p class="eyebrow">Personalized Low-Fatigue AAC</p>
+          <h1>面部微动作 AAC 输入原型</h1>
         </div>
         <div class="status-pill" id="runtimeStatus">
           <span class="dot dot-idle"></span>
@@ -40,6 +40,27 @@
             <button class="ghost-action icon-only" id="resetButton" type="button" title="清零计数">
               <i data-lucide="rotate-ccw"></i>
             </button>
+          </div>
+          <div class="communication-panel" aria-label="通信输出">
+            <div class="message-display">
+              <span class="metric-label">通信输出</span>
+              <strong id="messageText">等待输入</strong>
+              <span id="codeBuffer" class="code-buffer">--</span>
+            </div>
+            <div class="speech-actions">
+              <button class="ghost-action compact-action" id="repeatSpeechButton" type="button" title="重播语音">
+                <i data-lucide="volume-2"></i>
+                <span>重播</span>
+              </button>
+              <button class="ghost-action compact-action" id="clearSpeechButton" type="button" title="清空通信文本并停止播报">
+                <i data-lucide="trash-2"></i>
+                <span>清空</span>
+              </button>
+              <button class="ghost-action compact-action" id="pauseRecognitionButton" type="button" title="暂停识别">
+                <i data-lucide="pause"></i>
+                <span>暂停</span>
+              </button>
+            </div>
           </div>
         </section>
 
@@ -89,7 +110,86 @@
               <input id="overlayToggle" type="checkbox" checked />
               <span></span>
             </label>
-            <span>关键点</span>
+            <span>面部描边</span>
+          </div>
+
+          <div class="gesture-panel" aria-label="动作信号">
+            <div class="gesture-header">
+              <span>可选动作</span>
+              <span id="lastGesture">--</span>
+            </div>
+            <div class="gesture-bars">
+              <div class="gesture-row">
+                <span>抬眉确认</span>
+                <meter id="browMeter" min="0" max="1" value="0"></meter>
+                <strong id="browValue">0.00</strong>
+              </div>
+              <div class="gesture-row">
+                <span>张嘴吸痰</span>
+                <meter id="mouthMeter" min="0" max="1" value="0"></meter>
+                <strong id="mouthValue">0.00</strong>
+              </div>
+              <div class="gesture-row">
+                <span>微笑表达</span>
+                <meter id="smileMeter" min="0" max="1" value="0"></meter>
+                <strong id="smileValue">0.00</strong>
+              </div>
+              <div class="gesture-row">
+                <span>摇头取消</span>
+                <meter id="headMeter" min="0" max="1" value="0"></meter>
+                <strong id="headValue">0.00</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label>输入</label>
+            <div class="toggle-grid">
+              <label><input id="blinkCodeToggle" type="checkbox" checked />眨眼短码</label>
+              <label><input id="browToggle" type="checkbox" />抬眉确认</label>
+              <label><input id="mouthToggle" type="checkbox" />张嘴吸痰</label>
+              <label><input id="headShakeToggle" type="checkbox" />摇头取消</label>
+              <label><input id="smileToggle" type="checkbox" />微笑表达</label>
+              <label><input id="ttsToggle" type="checkbox" checked />语音</label>
+            </div>
+          </div>
+
+          <div class="calibration-panel" aria-label="引导校准与测试">
+            <div class="calibration-header">
+              <span>引导校准</span>
+              <span id="calibrationStatus">未开始</span>
+            </div>
+            <strong id="calibrationTitle">准备画面</strong>
+            <p id="calibrationInstruction">启动摄像头后，按步骤采集睁眼、闭眼、短眨和长闭眼样本；完成校准后才执行短语播报和动作映射。</p>
+            <div class="calibration-progress">
+              <div id="calibrationProgress"></div>
+            </div>
+            <div class="calibration-actions">
+              <button class="ghost-action compact-action" id="calibrationStartButton" type="button">开始</button>
+              <button class="ghost-action compact-action" id="calibrationCollectButton" type="button">采集</button>
+              <button class="ghost-action compact-action" id="calibrationNextButton" type="button">下一步</button>
+              <button class="ghost-action compact-action" id="calibrationResetButton" type="button">重置</button>
+            </div>
+            <div class="calibration-results">
+              <span>睁眼 <strong id="openEarResult">--</strong></span>
+              <span>闭眼 <strong id="closedEarResult">--</strong></span>
+              <span>阈值 <strong id="calibratedThresholdResult">--</strong></span>
+              <span>短眨 <strong id="shortBlinkResult">--</strong></span>
+              <span>长闭眼 <strong id="longBlinkResult">--</strong></span>
+            </div>
+            <div class="guided-test">
+              <select id="guidedTestSelect" aria-label="短码测试项">
+                <option value=".">单次短眨：应忽略</option>
+                <option value="-">单次长闭眼：应忽略</option>
+                <option value="..">两次短眨：校准后喝水/润口</option>
+                <option value="...">三次短眨：校准后紧急求助</option>
+                <option value="--">两次长闭眼：校准后休息</option>
+                <option value=".-">短眨+长闭眼：口腔确认</option>
+                <option value="-.">长闭眼+短眨：体位确认</option>
+              </select>
+              <button class="ghost-action compact-action" id="guidedTestButton" type="button">测试</button>
+            </div>
+            <p id="guidedTestStatus" class="guided-test-status">未开始测试</p>
           </div>
 
           <div class="signal-panel">
