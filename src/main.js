@@ -12,6 +12,7 @@ const stopButton = document.querySelector("#stopButton");
 const resetButton = document.querySelector("#resetButton");
 const runtimeStatus = document.querySelector("#runtimeStatus");
 const videoEmpty = document.querySelector("#videoEmpty");
+const emergencyOverlay = document.querySelector("#emergencyOverlay");
 const cameraSelect = document.querySelector("#cameraSelect");
 const thresholdRange = document.querySelector("#thresholdRange");
 const thresholdValue = document.querySelector("#thresholdValue");
@@ -66,15 +67,21 @@ const guidedTestSelect = document.querySelector("#guidedTestSelect");
 const guidedTestButton = document.querySelector("#guidedTestButton");
 const guidedTestStatus = document.querySelector("#guidedTestStatus");
 
-const MODEL_URL = "/mediapipe/models/face_landmarker.task";
-const WASM_URL = "/mediapipe/wasm";
+const APP_BASE_URL = new URL(import.meta.env.BASE_URL, window.location.href);
+const MODEL_URL = new URL("mediapipe/models/face_landmarker.task", APP_BASE_URL).toString();
+const WASM_URL = new URL("mediapipe/wasm", APP_BASE_URL).toString();
+const SERVICE_WORKER_URL = new URL("sw.js", APP_BASE_URL).toString();
 
 const BUILT_IN_CAMERA_HINTS = [
   "macbook",
   "facetime",
   "built-in",
   "built in",
+  "front",
+  "front camera",
+  "user",
   "内置",
+  "前置",
   "hd camera",
 ];
 
@@ -137,6 +144,8 @@ const GESTURE_MESSAGES = {
 
 const CONFIRMATION_TIMEOUT_MS = 10 * 1000;
 const MOUTH_DOUBLE_WINDOW_MS = 4000;
+const CALIBRATION_STORAGE_KEY = "alsFacialAac.defaultPatientCalibration.v1";
+const PWA_PROTOCOLS = new Set(["http:", "https:"]);
 const CALIBRATION_STEPS = [
   {
     id: "position",
@@ -178,11 +187,12 @@ const CALIBRATION_STEPS = [
   },
   {
     id: "review",
-    title: "6. 测试短码",
-    instruction: "选择下方测试项，按目标动作输入，系统会记录是否匹配。",
+    title: "6. 测试短码并确认",
+    instruction: "逐项测试下方短码；通过后系统会自动切到下一项。全部通过后点击“完成确认”，确认前不会执行真实短语播报或动作映射。",
     kind: "test",
   },
 ];
+const GUIDED_TEST_CODES = [".", "-", "..", "...", "--", ".-", "-."];
 
 const state = {
   faceLandmarker: null,
@@ -222,8 +232,10 @@ const state = {
     stepIndex: 0,
     collecting: false,
     collectStartedAt: 0,
+    confirmed: false,
     completedStepIds: [],
     activeTestCode: "",
+    guidedTestResults: {},
     samples: {
       openEar: [],
       closedEar: [],
@@ -279,6 +291,36 @@ function setControlsBusy(isBusy) {
   startButton.disabled = isBusy;
   cameraSelect.disabled = isBusy;
   stopButton.disabled = isBusy || !state.running;
+}
+
+function isAppleMobileDevice() {
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+function isStandaloneDisplay() {
+  return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+}
+
+function isPwaRegistrationContext() {
+  return PWA_PROTOCOLS.has(window.location.protocol) && window.isSecureContext;
+}
+
+function registerPwaServiceWorker() {
+  if (!("serviceWorker" in navigator) || !isPwaRegistrationContext()) {
+    return;
+  }
+
+  navigator.serviceWorker.register(SERVICE_WORKER_URL).catch(() => {
+    addLog("离线缓存注册失败，仍可在线使用");
+  });
+}
+
+function applyMobileRuntimeHints() {
+  document.documentElement.classList.toggle("is-apple-mobile", isAppleMobileDevice());
+  document.documentElement.classList.toggle("is-standalone", isStandaloneDisplay());
 }
 
 function resetDetectionWindow() {
@@ -360,6 +402,19 @@ function announce(text, gestureLabel, { shouldSpeak = true } = {}) {
   addLog(`${gestureLabel ? `${gestureLabel}：` : ""}${text}`);
 }
 
+let emergencyFlashTimer = null;
+
+function triggerEmergencyFlash() {
+  if (emergencyFlashTimer) {
+    return; // already flashing
+  }
+  emergencyOverlay.classList.add("is-active");
+  emergencyFlashTimer = window.setTimeout(() => {
+    emergencyOverlay.classList.remove("is-active");
+    emergencyFlashTimer = null;
+  }, 8000); // auto-stop after 8s
+}
+
 function updateCodeBuffer() {
   if (state.blinkCodeBuffer.length === 0) {
     codeBuffer.textContent = "--";
@@ -403,6 +458,141 @@ function hasCompletedCoreCalibration() {
   return ["open", "closed", "short", "long"].every((stepId) => isCalibrationStepComplete(stepId));
 }
 
+function hasCompletedGuidedTests() {
+  return GUIDED_TEST_CODES.every((code) => state.calibration.guidedTestResults[code]?.passed);
+}
+
+function guidedTestPassedCount() {
+  return GUIDED_TEST_CODES.filter((code) => state.calibration.guidedTestResults[code]?.passed).length;
+}
+
+function guidedTestProgressText() {
+  return `${guidedTestPassedCount()}/${GUIDED_TEST_CODES.length}`;
+}
+
+function hasConfirmedCalibration() {
+  return hasCompletedCoreCalibration() && state.calibration.confirmed;
+}
+
+function numericSamples(values) {
+  return Array.isArray(values) ? values.filter((value) => Number.isFinite(value)) : [];
+}
+
+function guidedTestResultsForSavedProfile(results = {}) {
+  return Object.fromEntries(
+    GUIDED_TEST_CODES.map((code) => [
+      code,
+      {
+        passed: Boolean(results[code]?.passed),
+        received: results[code]?.received || code,
+      },
+    ]),
+  );
+}
+
+function saveCalibrationProfile({ silent = false } = {}) {
+  if (!hasConfirmedCalibration()) {
+    return false;
+  }
+
+  const payload = {
+    version: 1,
+    savedAt: new Date().toISOString(),
+    threshold: Number(thresholdRange.value),
+    holdFrames: Number(holdFramesRange.value),
+    completedStepIds: Array.from(new Set([...state.calibration.completedStepIds, "review"])),
+    guidedTestResults: guidedTestResultsForSavedProfile(state.calibration.guidedTestResults),
+    samples: {
+      openEar: numericSamples(state.calibration.samples.openEar),
+      closedEar: numericSamples(state.calibration.samples.closedEar),
+      shortBlinkDurations: numericSamples(state.calibration.samples.shortBlinkDurations),
+      longBlinkDurations: numericSamples(state.calibration.samples.longBlinkDurations),
+    },
+  };
+
+  try {
+    window.localStorage.setItem(CALIBRATION_STORAGE_KEY, JSON.stringify(payload));
+    if (!silent) {
+      addLog("校准档案已保存，本机下次会自动沿用");
+    }
+    return true;
+  } catch {
+    if (!silent) {
+      addLog("校准档案保存失败，请检查浏览器本地存储权限");
+    }
+    return false;
+  }
+}
+
+function clearSavedCalibrationProfile() {
+  try {
+    window.localStorage.removeItem(CALIBRATION_STORAGE_KEY);
+  } catch {
+    addLog("本地校准档案清除失败");
+  }
+}
+
+function loadSavedCalibrationProfile() {
+  let payload = null;
+
+  try {
+    const raw = window.localStorage.getItem(CALIBRATION_STORAGE_KEY);
+    payload = raw ? JSON.parse(raw) : null;
+  } catch {
+    addLog("本地校准档案读取失败，已忽略");
+    return false;
+  }
+
+  if (!payload || payload.version !== 1) {
+    return false;
+  }
+
+  const savedGuidedResults = guidedTestResultsForSavedProfile(payload.guidedTestResults);
+  if (!GUIDED_TEST_CODES.every((code) => savedGuidedResults[code]?.passed)) {
+    addLog("本地校准档案不完整，已忽略");
+    return false;
+  }
+
+  const threshold = Number(payload.threshold);
+  if (Number.isFinite(threshold)) {
+    const clampedThreshold = clamp(threshold, Number(thresholdRange.min), Number(thresholdRange.max));
+    thresholdRange.value = clampedThreshold.toFixed(2);
+    thresholdValue.textContent = clampedThreshold.toFixed(2);
+    calibratedThresholdResult.textContent = clampedThreshold.toFixed(3);
+  }
+
+  const holdFrames = Number(payload.holdFrames);
+  if (Number.isFinite(holdFrames)) {
+    const clampedHoldFrames = Math.round(clamp(holdFrames, Number(holdFramesRange.min), Number(holdFramesRange.max)));
+    holdFramesRange.value = clampedHoldFrames.toString();
+    holdFramesValue.textContent = clampedHoldFrames.toString();
+  }
+
+  state.calibration.active = true;
+  state.calibration.stepIndex = CALIBRATION_STEPS.findIndex((step) => step.id === "review");
+  state.calibration.collecting = false;
+  state.calibration.collectStartedAt = 0;
+  state.calibration.confirmed = true;
+  state.calibration.completedStepIds = ["position", "open", "closed", "short", "long", "review"];
+  state.calibration.activeTestCode = "";
+  state.calibration.guidedTestResults = savedGuidedResults;
+  state.calibration.samples.openEar = numericSamples(payload.samples?.openEar);
+  state.calibration.samples.closedEar = numericSamples(payload.samples?.closedEar);
+  state.calibration.samples.shortBlinkDurations = numericSamples(payload.samples?.shortBlinkDurations);
+  state.calibration.samples.longBlinkDurations = numericSamples(payload.samples?.longBlinkDurations);
+
+  const savedDate = payload.savedAt ? new Date(payload.savedAt) : null;
+  const savedDateText =
+    savedDate && !Number.isNaN(savedDate.getTime())
+      ? savedDate.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+      : "本地";
+  guidedTestStatus.textContent = `已载入同一患者本地校准档案（${savedDateText}）。更换患者或状态变化时请重置。`;
+  setCommunicationMessage("已载入校准档案，可以开始通信输入。", "校准已载入");
+  addLog("已载入本机保存的校准档案");
+  updateCalibrationUI();
+  return true;
+}
+
 function updateCalibrationSummary() {
   const openEar = median(state.calibration.samples.openEar);
   const closedEar = median(state.calibration.samples.closedEar);
@@ -421,20 +611,47 @@ function updateCalibrationSummary() {
 function updateCalibrationUI() {
   const step = currentCalibrationStep();
   const complete = isCalibrationStepComplete(step.id);
+  const isTestStep = step.kind === "test";
   const canAdvance =
     state.calibration.active &&
     !state.calibration.collecting &&
     complete &&
     state.calibration.stepIndex < CALIBRATION_STEPS.length - 1;
+  const canConfirm =
+    state.calibration.active &&
+    isTestStep &&
+    hasCompletedCoreCalibration() &&
+    hasCompletedGuidedTests() &&
+    !state.calibration.activeTestCode &&
+    !state.calibration.confirmed;
   calibrationStatus.textContent = state.calibration.active
-    ? `${state.calibration.stepIndex + 1}/${CALIBRATION_STEPS.length}${state.calibration.collecting ? " 采集中" : ""}`
+    ? state.calibration.confirmed
+      ? "已确认"
+      : `${state.calibration.stepIndex + 1}/${CALIBRATION_STEPS.length}${state.calibration.collecting ? " 采集中" : ""}`
     : "未开始";
   calibrationTitle.textContent = step.title;
   calibrationInstruction.textContent = step.instruction;
-  calibrationProgress.style.width = complete ? "100%" : "0%";
+  calibrationProgress.style.width = isTestStep
+    ? `${Math.round((guidedTestPassedCount() / GUIDED_TEST_CODES.length) * 100)}%`
+    : complete
+      ? "100%"
+      : "0%";
   calibrationCollectButton.disabled =
     !state.calibration.active || state.calibration.collecting || step.kind === "check" || step.kind === "test";
-  calibrationNextButton.disabled = !canAdvance;
+  calibrationNextButton.textContent = isTestStep
+    ? state.calibration.confirmed
+      ? "已确认"
+      : "完成确认"
+    : "下一步";
+  calibrationNextButton.disabled = isTestStep ? !canConfirm : !canAdvance;
+  guidedTestSelect.disabled =
+    !state.calibration.active || !isTestStep || Boolean(state.calibration.activeTestCode) || state.calibration.confirmed;
+  guidedTestButton.disabled =
+    !state.running ||
+    !state.calibration.active ||
+    !isTestStep ||
+    Boolean(state.calibration.activeTestCode) ||
+    state.calibration.confirmed;
   updateCalibrationSummary();
 }
 
@@ -443,12 +660,15 @@ function resetCalibration() {
   clearBlinkCodeBuffer();
   clearPendingConfirmation();
   resetGestureSequences();
+  clearSavedCalibrationProfile();
   state.calibration.active = false;
   state.calibration.stepIndex = 0;
   state.calibration.collecting = false;
   state.calibration.collectStartedAt = 0;
+  state.calibration.confirmed = false;
   state.calibration.completedStepIds = [];
   state.calibration.activeTestCode = "";
+  state.calibration.guidedTestResults = {};
   state.calibration.samples.openEar = [];
   state.calibration.samples.closedEar = [];
   state.calibration.samples.shortBlinkDurations = [];
@@ -456,7 +676,7 @@ function resetCalibration() {
   calibratedThresholdResult.textContent = "--";
   guidedTestStatus.textContent = "未开始测试";
   updateCalibrationUI();
-  addLog("引导校准已重置");
+  addLog("引导校准已重置，本地校准档案已清除");
 }
 
 function startCalibrationGuide() {
@@ -468,8 +688,10 @@ function startCalibrationGuide() {
   state.calibration.stepIndex = 0;
   state.calibration.collecting = false;
   state.calibration.collectStartedAt = 0;
+  state.calibration.confirmed = false;
   state.calibration.completedStepIds = [];
   state.calibration.activeTestCode = "";
+  state.calibration.guidedTestResults = {};
   state.calibration.samples.openEar = [];
   state.calibration.samples.closedEar = [];
   state.calibration.samples.shortBlinkDurations = [];
@@ -493,13 +715,44 @@ function moveToNextCalibrationStep() {
     return;
   }
 
+  if (step.kind === "test") {
+    if (state.calibration.activeTestCode) {
+      guidedTestStatus.textContent = "当前测试还在等待输入，请先完成或重置校准。";
+      addLog("短码测试等待输入中，暂不能完成确认");
+      return;
+    }
+
+    if (!hasCompletedGuidedTests()) {
+      guidedTestStatus.textContent = `短码测试进度 ${guidedTestProgressText()}，请先完成全部测试项。`;
+      addLog(`短码测试未完成：${guidedTestProgressText()}`);
+      return;
+    }
+
+    markCalibrationStepComplete(step.id);
+    state.calibration.confirmed = true;
+    guidedTestStatus.textContent = "全部短码测试已通过，校准已确认。";
+    setCommunicationMessage("校准已确认，可以开始通信输入。", "校准完成");
+    addLog("引导校准已确认完成");
+    saveCalibrationProfile();
+    updateCalibrationUI();
+    return;
+  }
+
   if (!isCalibrationStepComplete(step.id)) {
     addLog("当前校准步骤尚未完成");
     return;
   }
 
   state.calibration.collecting = false;
+  calibrationProgress.classList.remove("is-collecting");
   state.calibration.stepIndex = Math.min(state.calibration.stepIndex + 1, CALIBRATION_STEPS.length - 1);
+  if (currentCalibrationStep().kind === "test") {
+    const nextCode = GUIDED_TEST_CODES.find((testCode) => !state.calibration.guidedTestResults[testCode]?.passed);
+    if (nextCode) {
+      guidedTestSelect.value = nextCode;
+    }
+    guidedTestStatus.textContent = `短码测试进度 ${guidedTestProgressText()}，选择测试项后点击“测试”。`;
+  }
   updateCalibrationUI();
 }
 
@@ -521,6 +774,7 @@ function beginCalibrationCollection() {
     state.calibration.samples[step.sampleKey] = [];
   }
   calibrationProgress.style.width = "0%";
+  calibrationProgress.classList.add("is-collecting");
   addLog(`开始采集：${step.title}`);
   updateCalibrationUI();
 }
@@ -552,6 +806,7 @@ function applyCalibratedThreshold() {
 function finishCalibrationCollection() {
   const step = currentCalibrationStep();
   state.calibration.collecting = false;
+  calibrationProgress.classList.remove("is-collecting");
   markCalibrationStepComplete(step.id);
   if (step.id === "closed") {
     applyCalibratedThreshold();
@@ -606,12 +861,30 @@ function startGuidedTest() {
     return;
   }
 
+  if (!state.calibration.active || currentCalibrationStep().kind !== "test") {
+    guidedTestStatus.textContent = "请先完成前面校准步骤，并进入“测试短码”。";
+    addLog("尚未进入短码测试步骤");
+    return;
+  }
+
+  if (!hasCompletedCoreCalibration()) {
+    guidedTestStatus.textContent = "请先完成睁眼、闭眼、短眨和长闭眼样本采集。";
+    addLog("核心校准未完成，暂不能测试短码");
+    return;
+  }
+
+  if (state.calibration.confirmed) {
+    guidedTestStatus.textContent = "校准已确认。如需重测，请先重置校准。";
+    return;
+  }
+
   clearBlinkCodeBuffer();
   clearPendingConfirmation();
   resetGestureSequences();
   state.calibration.activeTestCode = guidedTestSelect.value;
   guidedTestStatus.textContent = `等待输入：${displayBlinkCode(state.calibration.activeTestCode)}`;
   addLog(`开始测试短码 ${state.calibration.activeTestCode}`);
+  updateCalibrationUI();
 }
 
 function recordGuidedTestCode(code, { overflowed = false } = {}) {
@@ -621,11 +894,24 @@ function recordGuidedTestCode(code, { overflowed = false } = {}) {
 
   const expected = state.calibration.activeTestCode;
   const ok = !overflowed && code === expected;
-  guidedTestStatus.textContent = ok
-    ? `通过：收到 ${displayBlinkCode(code)}`
-    : `不匹配：期望 ${displayBlinkCode(expected)}，收到 ${overflowed ? "过长短码" : displayBlinkCode(code)}`;
+  state.calibration.guidedTestResults[expected] = {
+    passed: ok,
+    received: overflowed ? "overflow" : code,
+  };
   addLog(`短码测试${ok ? "通过" : "不匹配"}：${expected} / ${overflowed ? "overflow" : code}`);
   state.calibration.activeTestCode = "";
+  if (ok) {
+    const nextCode = GUIDED_TEST_CODES.find((testCode) => !state.calibration.guidedTestResults[testCode]?.passed);
+    if (nextCode) {
+      guidedTestSelect.value = nextCode;
+      guidedTestStatus.textContent = `通过：收到 ${displayBlinkCode(code)}。进度 ${guidedTestProgressText()}，已切到下一项 ${displayBlinkCode(nextCode)}，请点“测试”。`;
+    } else {
+      guidedTestStatus.textContent = "全部短码测试已通过，请点“完成确认”。";
+    }
+  } else {
+    guidedTestStatus.textContent = `不匹配：期望 ${displayBlinkCode(expected)}，收到 ${overflowed ? "过长短码" : displayBlinkCode(code)}。请重新点“测试”。`;
+  }
+  updateCalibrationUI();
   return true;
 }
 
@@ -746,9 +1032,9 @@ function decodeBlinkCode() {
 
   const confirmation = CONFIRMATION_BLINK_CODES[code];
   if (confirmation) {
-    if (!hasCompletedCoreCalibration()) {
-      setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成引导校准后才进入确认流程。`, "未校准");
-      addLog(`短码 ${displayBlinkCode(code)} 已识别，因未完成引导校准而未进入确认流程`);
+    if (!hasConfirmedCalibration()) {
+      setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成并确认引导校准后才进入确认流程。`, "未确认");
+      addLog(`短码 ${displayBlinkCode(code)} 已识别，因引导校准未确认而未进入确认流程`);
       return;
     }
 
@@ -758,15 +1044,19 @@ function decodeBlinkCode() {
 
   const phrase = DIRECT_BLINK_CODES[code];
   if (phrase) {
-    if (!hasCompletedCoreCalibration()) {
-      setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成引导校准后才播报短语。`, "未校准");
-      addLog(`短码 ${displayBlinkCode(code)} 已识别，因未完成引导校准而未播报`);
+    if (!hasConfirmedCalibration()) {
+      setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成并确认引导校准后才播报短语。`, "未确认");
+      addLog(`短码 ${displayBlinkCode(code)} 已识别，因引导校准未确认而未播报`);
       return;
     }
 
     announce(phrase.text, `短码 ${displayBlinkCode(code)}`, {
       shouldSpeak: phrase.speak,
     });
+
+    if (code === "...") {
+      triggerEmergencyFlash();
+    }
 
     if (phrase.pauseMs) {
       pauseRecognition(phrase.pauseMs, { preserveMessage: true });
@@ -954,9 +1244,9 @@ function handleGestureEvent(event, label) {
     return;
   }
 
-  if (!hasCompletedCoreCalibration()) {
-    setCommunicationMessage(`检测到${label}；完成引导校准后才启用动作映射。`, `${label}候选`);
-    addLog(`${label}候选：${Math.round(event.duration)}ms，峰值 ${(event.value || 0).toFixed(2)}，未校准未播报`);
+  if (!hasConfirmedCalibration()) {
+    setCommunicationMessage(`检测到${label}；完成并确认引导校准后才启用动作映射。`, `${label}候选`);
+    addLog(`${label}候选：${Math.round(event.duration)}ms，峰值 ${(event.value || 0).toFixed(2)}，校准未确认未播报`);
     return;
   }
 
@@ -1313,7 +1603,21 @@ async function startCamera(deviceId = state.selectedDeviceId) {
     addLog("当前浏览器无法访问摄像头");
     showDiagnostic(
       "当前浏览器不支持摄像头",
-      `请用 Chrome 或 Safari 打开 ${window.location.href}，再允许摄像头权限。`,
+      isAppleMobileDevice()
+        ? "请用 iPhone Safari 打开 HTTPS 地址，或从主屏幕安装后的应用打开，并允许摄像头权限。"
+        : `请用 Chrome 或 Safari 打开 ${window.location.href}，再允许摄像头权限。`,
+    );
+    return;
+  }
+
+  if (!window.isSecureContext) {
+    setStatus("需要安全连接", "error");
+    addLog("摄像头需要 HTTPS 或本机安全环境");
+    showDiagnostic(
+      "摄像头需要安全连接",
+      isAppleMobileDevice()
+        ? "iPhone Safari 必须通过 HTTPS 地址访问才允许摄像头。请部署到 HTTPS 后再添加到主屏幕。"
+        : "请使用 HTTPS 地址，或在本机 localhost/桌面应用中打开。",
     );
     return;
   }
@@ -1371,6 +1675,7 @@ async function startCamera(deviceId = state.selectedDeviceId) {
       track.addEventListener("ended", () => handleCameraEnded(stream), { once: true });
     });
     addLog(`已连接：${cameraSelect.selectedOptions[0]?.textContent || "MacBook 摄像头"}`);
+    stopButton.classList.add("is-danger");
     detectLoop();
   } catch (error) {
     console.error(error);
@@ -1384,12 +1689,19 @@ async function startCamera(deviceId = state.selectedDeviceId) {
   } finally {
     state.starting = false;
     setControlsBusy(false);
+    updateCalibrationUI();
   }
 }
 
 function stopCamera(clearStatus = true) {
   state.running = false;
   cancelAnimationFrame(state.rafId);
+  stopButton.classList.remove("is-danger");
+  emergencyOverlay.classList.remove("is-active");
+  if (emergencyFlashTimer) {
+    clearTimeout(emergencyFlashTimer);
+    emergencyFlashTimer = null;
+  }
   state.stream?.getTracks().forEach((track) => track.stop());
   state.stream = null;
   video.pause();
@@ -1397,6 +1709,7 @@ function stopCamera(clearStatus = true) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   videoEmpty.classList.remove("hidden");
   setControlsBusy(state.starting);
+  updateCalibrationUI();
 
   if (clearStatus) {
     setStatus("已停止", "idle");
@@ -1720,15 +2033,26 @@ function resetCounters() {
   resetGestureSequences();
   blinkCount.textContent = "0";
   blinkState.textContent = state.running ? "检测中" : "未检测";
+  emergencyOverlay.classList.remove("is-active");
+  if (emergencyFlashTimer) {
+    clearTimeout(emergencyFlashTimer);
+    emergencyFlashTimer = null;
+  }
   addLog("计数已清零");
 }
 
 thresholdRange.addEventListener("input", () => {
   thresholdValue.textContent = Number(thresholdRange.value).toFixed(2);
+  if (hasConfirmedCalibration()) {
+    saveCalibrationProfile({ silent: true });
+  }
 });
 
 holdFramesRange.addEventListener("input", () => {
   holdFramesValue.textContent = holdFramesRange.value;
+  if (hasConfirmedCalibration()) {
+    saveCalibrationProfile({ silent: true });
+  }
 });
 
 startButton.addEventListener("click", () => {
@@ -1807,6 +2131,7 @@ navigator.mediaDevices?.addEventListener?.("devicechange", () => {
 });
 
 window.addEventListener("resize", resizeCanvas);
+window.matchMedia?.("(display-mode: standalone)")?.addEventListener?.("change", applyMobileRuntimeHints);
 
 refreshCameraList().catch(() => {
   const option = document.createElement("option");
@@ -1815,4 +2140,9 @@ refreshCameraList().catch(() => {
   cameraSelect.append(option);
 });
 
-updateCalibrationUI();
+applyMobileRuntimeHints();
+registerPwaServiceWorker();
+
+if (!loadSavedCalibrationProfile()) {
+  updateCalibrationUI();
+}

@@ -1,18 +1,66 @@
 {
   "name": "als-facial-gesture-aac",
   "version": "0.2.1",
+  "description": "ALS facial micro-movement AAC input prototype packaged as a local desktop app.",
+  "author": "aliensas",
   "private": true,
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "desktop": "npm run build && electron .",
+    "package": "npm run build && electron-builder --dir --publish=never",
+    "dist": "npm run build && electron-builder --publish=never",
+    "dist:mac": "npm run build && electron-builder --mac dmg zip --publish=never",
+    "dist:win": "npm run build && electron-builder --win zip --x64 --publish=never",
+    "dist:win:installer": "npm run build && electron-builder --win nsis --x64 --publish=never"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.35",
     "lucide": "^1.16.0"
   },
   "devDependencies": {
+    "electron": "^42.1.0",
+    "electron-builder": "^26.8.1",
     "vite": "^8.0.13"
+  },
+  "build": {
+    "appId": "com.aliensas.alsfacialaac",
+    "productName": "ALS 面部微动作 AAC",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.medical",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "identity": null,
+      "extendInfo": {
+        "NSCameraUsageDescription": "ALS 面部微动作 AAC 需要使用摄像头识别面部动作和眨眼短码。",
+        "NSMicrophoneUsageDescription": "此应用不录音；仅在系统要求时声明麦克风权限。"
+      }
+    },
+    "win": {
+      "target": [
+        "zip",
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility"
+    }
   }
 }

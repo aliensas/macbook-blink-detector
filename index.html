@@ -2,7 +2,19 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#080c14" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="ALS AAC" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta
+      name="description"
+      content="ALS 面部微动作 AAC 输入原型，用摄像头识别低疲劳面部动作和眨眼短码。"
+    />
+    <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="%BASE_URL%icons/apple-touch-icon.png" />
+    <link rel="icon" href="%BASE_URL%icons/icon.svg" type="image/svg+xml" />
     <title>ALS 面部微动作 AAC 输入原型</title>
   </head>
   <body>
@@ -23,6 +35,7 @@
           <div class="video-shell">
             <video id="cameraVideo" playsinline muted></video>
             <canvas id="overlayCanvas"></canvas>
+            <div class="video-shell-emergency" id="emergencyOverlay"></div>
             <div class="video-empty" id="videoEmpty">
               <i data-lucide="camera"></i>
               <span>等待摄像头</span>
@@ -81,6 +94,16 @@
             <div class="metric">
               <span class="metric-label">FPS</span>
               <strong id="fpsValue">--</strong>
+            </div>
+          </div>
+
+          <div class="signal-panel">
+            <div class="signal-header">
+              <span>眼睛开合</span>
+              <span id="confidenceLabel">--</span>
+            </div>
+            <div class="signal-track">
+              <div class="signal-fill" id="earBar"></div>
             </div>
           </div>
 
@@ -190,16 +213,6 @@
               <button class="ghost-action compact-action" id="guidedTestButton" type="button">测试</button>
             </div>
             <p id="guidedTestStatus" class="guided-test-status">未开始测试</p>
-          </div>
-
-          <div class="signal-panel">
-            <div class="signal-header">
-              <span>眼睛开合</span>
-              <span id="confidenceLabel">--</span>
-            </div>
-            <div class="signal-track">
-              <div class="signal-fill" id="earBar"></div>
-            </div>
           </div>
 
           <div class="diagnostic-panel hidden" id="diagnosticPanel">

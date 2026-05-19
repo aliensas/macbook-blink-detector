@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="ALS AAC">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="34%" r="70%">
+      <stop offset="0%" stop-color="#164e63"/>
+      <stop offset="58%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="112" y1="128" x2="400" y2="384">
+      <stop offset="0%" stop-color="#7dd3fc"/>
+      <stop offset="52%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="246" r="132" fill="none" stroke="url(#ring)" stroke-width="26"/>
+  <path d="M136 246c34-50 72-74 120-74s86 24 120 74c-34 50-72 74-120 74s-86-24-120-74Z" fill="#020617" stroke="#7dd3fc" stroke-width="18" stroke-linejoin="round"/>
+  <circle cx="256" cy="246" r="34" fill="#38bdf8"/>
+  <circle cx="256" cy="246" r="14" fill="#020617"/>
+  <path d="M190 380h132c36 0 58-20 58-52" fill="none" stroke="#34d399" stroke-width="22" stroke-linecap="round"/>
+  <circle cx="166" cy="380" r="16" fill="#34d399"/>
+</svg>
