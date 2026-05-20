@@ -1287,20 +1287,28 @@ function startGuidedTest() {
   updateCalibrationUI();
 }
 
-function recordGuidedTestCode(code, { overflowed = false } = {}) {
+function recordGuidedTestCode(
+  code,
+  { overflowed = false, actionStartedAt = null, actionEndedAt = null, decodedAt = null } = {},
+) {
   if (!state.calibration.activeTestCode) {
     return false;
   }
 
   const expected = state.calibration.activeTestCode;
   if (expected === "--" && code === "-" && !overflowed) {
-    const now = performance.now();
+    const firstLongAt = Number.isFinite(decodedAt)
+      ? decodedAt
+      : Number.isFinite(actionEndedAt)
+        ? actionEndedAt
+        : performance.now();
+    const secondLongAt = Number.isFinite(actionStartedAt) ? actionStartedAt : firstLongAt;
     const hasFirstLong =
       state.calibration.guidedRestFirstLongAt &&
-      now - state.calibration.guidedRestFirstLongAt <= BLINK_SYMBOLS.separatedLongWindowMs;
+      secondLongAt - state.calibration.guidedRestFirstLongAt <= BLINK_SYMBOLS.separatedLongWindowMs;
 
     if (!hasFirstLong) {
-      state.calibration.guidedRestFirstLongAt = now;
+      state.calibration.guidedRestFirstLongAt = firstLongAt;
       updatePendingTestRecord({
         expected,
         received: "-",
@@ -1398,17 +1406,22 @@ function startConfirmation(config) {
   announce(config.prompt, config.label, { shouldSpeak: true });
 }
 
-function resolveSeparatedLongBlinkRest(code) {
+function resolveSeparatedLongBlinkRest({ code, actionStartedAt = null, actionEndedAt = null, decodedAt = null } = {}) {
   if (code !== "-" || !hasConfirmedCalibration()) {
     return false;
   }
 
-  const now = performance.now();
+  const firstLongAt = Number.isFinite(decodedAt)
+    ? decodedAt
+    : Number.isFinite(actionEndedAt)
+      ? actionEndedAt
+      : performance.now();
+  const secondLongAt = Number.isFinite(actionStartedAt) ? actionStartedAt : firstLongAt;
   const hasFirstLong =
-    state.pendingSeparatedLongAt && now - state.pendingSeparatedLongAt <= BLINK_SYMBOLS.separatedLongWindowMs;
+    state.pendingSeparatedLongAt && secondLongAt - state.pendingSeparatedLongAt <= BLINK_SYMBOLS.separatedLongWindowMs;
 
   if (!hasFirstLong) {
-    state.pendingSeparatedLongAt = now;
+    state.pendingSeparatedLongAt = firstLongAt;
     setCommunicationMessage("已收到一次长闭眼；6 秒内再做一次会进入休息。", "休息 1/2");
     addLog("一次长闭眼：等待第二次长闭眼触发休息");
     finishPendingTestRecord({ note: "waiting_second_long_blink_for_rest" });
@@ -1490,7 +1503,7 @@ function decodeBlinkCode() {
   clearBlinkCodeBuffer();
 
   if (overflowed) {
-    if (recordGuidedTestCode(code, { overflowed: true })) {
+    if (recordGuidedTestCode(code, { overflowed: true, actionStartedAt, actionEndedAt, decodedAt })) {
       return;
     }
     setCommunicationMessage("短码过长，已忽略", "短码");
@@ -1499,7 +1512,7 @@ function decodeBlinkCode() {
     return;
   }
 
-  if (recordGuidedTestCode(code)) {
+  if (recordGuidedTestCode(code, { actionStartedAt, actionEndedAt, decodedAt })) {
     return;
   }
 
@@ -1515,7 +1528,7 @@ function decodeBlinkCode() {
   }
 
   if (code === "-") {
-    if (resolveSeparatedLongBlinkRest(code)) {
+    if (resolveSeparatedLongBlinkRest({ code, actionStartedAt, actionEndedAt, decodedAt })) {
       return;
     }
 
