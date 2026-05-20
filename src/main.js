@@ -160,13 +160,13 @@ const PWA_PROTOCOLS = new Set(["http:", "https:"]);
 const CALIBRATION_STEPS = [
   {
     id: "position",
-    title: "1. 准备画面",
+    title: "准备画面",
     instruction: "确认人脸完整、面部描边贴合、光线稳定。完成后进入下一步。",
     kind: "check",
   },
   {
     id: "open",
-    title: "2. 自然睁眼基线",
+    title: "1. 自然睁眼基线",
     instruction: "保持自然睁眼，点击“采集”，系统会采集 2 秒 EAR 基线。",
     kind: "ear",
     sampleKey: "openEar",
@@ -174,7 +174,7 @@ const CALIBRATION_STEPS = [
   },
   {
     id: "closed",
-    title: "3. 轻闭眼基线",
+    title: "2. 轻闭眼基线",
     instruction: "轻轻闭眼，点击“采集”，系统会采集 1.5 秒闭眼 EAR，并更新眨眼阈值。",
     kind: "ear",
     sampleKey: "closedEar",
@@ -182,7 +182,7 @@ const CALIBRATION_STEPS = [
   },
   {
     id: "short",
-    title: "4. 主动短眨样本",
+    title: "3. 主动短眨样本",
     instruction: "点击“采集”后做 3 次低疲劳短眨，每次间隔约 1 秒。",
     kind: "blink",
     sampleKey: "shortBlinkDurations",
@@ -190,7 +190,7 @@ const CALIBRATION_STEPS = [
   },
   {
     id: "long",
-    title: "5. 长闭眼样本",
+    title: "4. 长闭眼样本",
     instruction: "点击“采集”后做 1 次可控长闭眼，不要勉强。",
     kind: "blink",
     sampleKey: "longBlinkDurations",
@@ -198,7 +198,7 @@ const CALIBRATION_STEPS = [
   },
   {
     id: "review",
-    title: "6. 确认校准",
+    title: "5. 确认校准",
     instruction: "核心校准完成后即可点击“完成确认”。下方短码测试是可选验证，用来继续观察误触和准确率。",
     kind: "test",
   },
@@ -950,6 +950,8 @@ function updateCalibrationUI() {
   const step = currentCalibrationStep();
   const complete = isCalibrationStepComplete(step.id);
   const isTestStep = step.kind === "test";
+  const activeCalibrationStepIndex = Math.max(1, state.calibration.stepIndex);
+  const activeCalibrationStepCount = CALIBRATION_STEPS.length - 1;
   const canCollect =
     state.calibration.active &&
     state.running &&
@@ -970,7 +972,7 @@ function updateCalibrationUI() {
   calibrationStatus.textContent = state.calibration.active
     ? state.calibration.confirmed
       ? "已确认"
-      : `${state.calibration.stepIndex + 1}/${CALIBRATION_STEPS.length}${state.calibration.collecting ? " 采集中" : ""}`
+      : `${activeCalibrationStepIndex}/${activeCalibrationStepCount}${state.calibration.collecting ? " 采集中" : ""}`
     : "未开始";
   calibrationTitle.textContent = step.title;
   calibrationInstruction.textContent = step.instruction;
@@ -1488,6 +1490,10 @@ function decodeBlinkCode() {
 
 function enqueueBlinkSymbol(symbol, meta = {}) {
   if (!blinkCodeToggle.checked || isRecognitionPaused(performance.now())) {
+    return;
+  }
+
+  if (state.calibration.active && !state.calibration.confirmed && currentCalibrationStep().kind !== "test") {
     return;
   }
 
