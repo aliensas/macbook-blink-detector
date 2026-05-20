@@ -914,6 +914,59 @@ input[type="range"] {
   font-weight: 700;
 }
 
+/* ── Engineering Panel ───────────────────────────────────── */
+.engineer-panel {
+  display: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+}
+
+.engineering-mode .engineer-panel {
+  display: block;
+}
+
+.engineer-panel summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 14px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.86rem;
+  font-weight: 800;
+  list-style: none;
+}
+
+.engineer-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.engineer-panel summary::after {
+  content: "+";
+  color: var(--accent);
+  font-size: 1rem;
+}
+
+.engineer-panel[open] summary::after {
+  content: "-";
+}
+
+.engineer-panel small {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.engineer-panel-body {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  padding: 14px;
+}
+
 /* ── Test Recording Panel ───────────────────────────────── */
 .recording-panel {
   display: grid;

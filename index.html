@@ -177,13 +177,13 @@
             </div>
           </div>
 
-          <div class="calibration-panel" aria-label="引导校准与测试">
+          <div class="calibration-panel" aria-label="引导校准">
             <div class="calibration-header">
               <span>引导校准</span>
               <span id="calibrationStatus">未开始</span>
             </div>
             <strong id="calibrationTitle">准备画面</strong>
-            <p id="calibrationInstruction">启动摄像头后，按提示采集睁眼、闭眼、短眨和长闭眼样本；核心校准完成后即可确认，短码测试可作为额外验证。</p>
+            <p id="calibrationInstruction">启动摄像头后，按提示采集睁眼、闭眼、短眨和长闭眼样本；核心校准完成后即可确认。</p>
             <div class="calibration-progress">
               <div id="calibrationProgress"></div>
             </div>
@@ -200,69 +200,78 @@
               <span>短眨 <strong id="shortBlinkResult">--</strong></span>
               <span>长闭眼 <strong id="longBlinkResult">--</strong></span>
             </div>
-            <div class="guided-test">
-              <select id="guidedTestSelect" aria-label="短码测试项">
-                <option value=".">单次短眨：应忽略</option>
-                <option value="-">单次长闭眼：单独不播报</option>
-                <option value="..">两次短眨：校准后喝水/润口</option>
-                <option value="...">三次短眨：校准后紧急求助</option>
-                <option value="--">两次长闭眼：校准后休息（6 秒内）</option>
-                <option value=".-">短眨+长闭眼：口腔确认</option>
-                <option value="-.">长闭眼+短眨：体位确认</option>
-              </select>
-              <button class="ghost-action compact-action" id="guidedTestButton" type="button">测试</button>
-            </div>
-            <p id="guidedTestStatus" class="guided-test-status">未开始测试</p>
           </div>
 
-          <div class="recording-panel" aria-label="测试记录">
-            <div class="recording-header">
-              <span>测试记录</span>
-              <span id="recordingStatus">未记录</span>
+          <details class="engineer-panel" aria-label="工程测试">
+            <summary>
+              <span>工程测试</span>
+              <small>短码验证与记录导出</small>
+            </summary>
+            <div class="engineer-panel-body">
+              <div class="guided-test">
+                <select id="guidedTestSelect" aria-label="短码测试项">
+                  <option value=".">单次短眨：应忽略</option>
+                  <option value="-">单次长闭眼：单独不播报</option>
+                  <option value="..">两次短眨：校准后喝水/润口</option>
+                  <option value="...">三次短眨：校准后紧急求助</option>
+                  <option value="--">两次长闭眼：校准后休息（6 秒内）</option>
+                  <option value=".-">短眨+长闭眼：口腔确认</option>
+                  <option value="-.">长闭眼+短眨：体位确认</option>
+                </select>
+                <button class="ghost-action compact-action" id="guidedTestButton" type="button">测试</button>
+              </div>
+              <p id="guidedTestStatus" class="guided-test-status">工程测试未启动</p>
+
+              <div class="recording-panel" aria-label="测试记录">
+                <div class="recording-header">
+                  <span>测试记录</span>
+                  <span id="recordingStatus">未记录</span>
+                </div>
+                <div class="recording-metrics">
+                  <span>条目 <strong id="recordingCount">0</strong></span>
+                  <span>正确率 <strong id="recordingAccuracy">--</strong></span>
+                  <span>文字延迟 <strong id="recordingLatency">--</strong></span>
+                </div>
+                <div class="recording-expected">
+                  <label for="recordingExpectedSelect">预期动作</label>
+                  <select id="recordingExpectedSelect">
+                    <option value="">未指定</option>
+                    <option value=".">单次短眨</option>
+                    <option value="-">单次长闭眼</option>
+                    <option value="..">两次短眨</option>
+                    <option value="...">三次短眨</option>
+                    <option value="--">两次长闭眼（6 秒内）</option>
+                    <option value=".-">短眨+长闭眼</option>
+                    <option value="-.">长闭眼+短眨</option>
+                    <option value="BROW_RAISE">抬眉</option>
+                    <option value="MOUTH_OPEN">张嘴</option>
+                    <option value="SMILE">微笑</option>
+                    <option value="HEAD_SHAKE">摇头</option>
+                  </select>
+                </div>
+                <div class="recording-actions">
+                  <button class="ghost-action compact-action" id="recordingStartButton" type="button">
+                    <i data-lucide="circle"></i>
+                    <span>开始记录</span>
+                  </button>
+                  <button class="ghost-action compact-action" id="recordingStopButton" type="button" disabled>
+                    <i data-lucide="square"></i>
+                    <span>停止</span>
+                  </button>
+                  <button class="ghost-action compact-action" id="recordingMarkCorrectButton" type="button" disabled>正确</button>
+                  <button class="ghost-action compact-action" id="recordingMarkWrongButton" type="button" disabled>错误</button>
+                  <button class="ghost-action compact-action" id="recordingExportJsonButton" type="button" disabled>
+                    <i data-lucide="download"></i>
+                    <span>JSON</span>
+                  </button>
+                  <button class="ghost-action compact-action" id="recordingExportCsvButton" type="button" disabled>
+                    <i data-lucide="download"></i>
+                    <span>CSV</span>
+                  </button>
+                </div>
+              </div>
             </div>
-            <div class="recording-metrics">
-              <span>条目 <strong id="recordingCount">0</strong></span>
-              <span>正确率 <strong id="recordingAccuracy">--</strong></span>
-              <span>文字延迟 <strong id="recordingLatency">--</strong></span>
-            </div>
-            <div class="recording-expected">
-              <label for="recordingExpectedSelect">预期动作</label>
-              <select id="recordingExpectedSelect">
-                <option value="">未指定</option>
-                <option value=".">单次短眨</option>
-                <option value="-">单次长闭眼</option>
-                <option value="..">两次短眨</option>
-                <option value="...">三次短眨</option>
-                <option value="--">两次长闭眼（6 秒内）</option>
-                <option value=".-">短眨+长闭眼</option>
-                <option value="-.">长闭眼+短眨</option>
-                <option value="BROW_RAISE">抬眉</option>
-                <option value="MOUTH_OPEN">张嘴</option>
-                <option value="SMILE">微笑</option>
-                <option value="HEAD_SHAKE">摇头</option>
-              </select>
-            </div>
-            <div class="recording-actions">
-              <button class="ghost-action compact-action" id="recordingStartButton" type="button">
-                <i data-lucide="circle"></i>
-                <span>开始记录</span>
-              </button>
-              <button class="ghost-action compact-action" id="recordingStopButton" type="button" disabled>
-                <i data-lucide="square"></i>
-                <span>停止</span>
-              </button>
-              <button class="ghost-action compact-action" id="recordingMarkCorrectButton" type="button" disabled>正确</button>
-              <button class="ghost-action compact-action" id="recordingMarkWrongButton" type="button" disabled>错误</button>
-              <button class="ghost-action compact-action" id="recordingExportJsonButton" type="button" disabled>
-                <i data-lucide="download"></i>
-                <span>JSON</span>
-              </button>
-              <button class="ghost-action compact-action" id="recordingExportCsvButton" type="button" disabled>
-                <i data-lucide="download"></i>
-                <span>CSV</span>
-              </button>
-            </div>
-          </div>
+          </details>
 
           <div class="diagnostic-panel hidden" id="diagnosticPanel">
             <div>

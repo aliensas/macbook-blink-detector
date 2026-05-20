@@ -82,6 +82,9 @@ const APP_BASE_URL = new URL(import.meta.env.BASE_URL, window.location.href);
 const MODEL_URL = new URL("mediapipe/models/face_landmarker.task", APP_BASE_URL).toString();
 const WASM_URL = new URL("mediapipe/wasm", APP_BASE_URL).toString();
 const SERVICE_WORKER_URL = new URL("sw.js", APP_BASE_URL).toString();
+const ENGINEERING_MODE = new URLSearchParams(window.location.search).has("debug");
+
+document.documentElement.classList.toggle("engineering-mode", ENGINEERING_MODE);
 
 const BUILT_IN_CAMERA_HINTS = [
   "macbook",
@@ -1005,13 +1008,12 @@ function updateCalibrationUI() {
     : "下一步";
   calibrationNextButton.disabled = isTestStep ? !canConfirm : !canAdvance;
   guidedTestSelect.disabled =
-    !state.calibration.active || !isTestStep || Boolean(state.calibration.activeTestCode) || state.calibration.confirmed;
+    !state.calibration.active || !isTestStep || Boolean(state.calibration.activeTestCode);
   guidedTestButton.disabled =
     !state.running ||
     !state.calibration.active ||
     !isTestStep ||
-    Boolean(state.calibration.activeTestCode) ||
-    state.calibration.confirmed;
+    Boolean(state.calibration.activeTestCode);
   updateCalibrationSummary();
 }
 
@@ -1118,8 +1120,8 @@ function moveToNextCalibrationStep() {
     markCalibrationStepComplete(step.id);
     state.calibration.confirmed = true;
     guidedTestStatus.textContent = hasCompletedGuidedTests()
-      ? "全部短码测试已通过，校准已确认。"
-      : `校准已确认。短码测试进度 ${guidedTestProgressText()}，后续可在测试记录中继续评估。`;
+      ? "全部短码测试已通过，校准已确认。工程测试仍可继续复测。"
+      : `校准已确认。工程测试可继续验证短码，当前进度 ${guidedTestProgressText()}。`;
     setCommunicationMessage("校准已确认，可以开始通信输入。", "校准完成");
     addLog("引导校准已确认完成");
     saveCalibrationProfile();
@@ -1268,11 +1270,6 @@ function startGuidedTest() {
   if (!hasCompletedCoreCalibration()) {
     guidedTestStatus.textContent = "请先完成睁眼、闭眼、短眨和长闭眼样本采集。";
     addLog("核心校准未完成，暂不能测试短码");
-    return;
-  }
-
-  if (state.calibration.confirmed) {
-    guidedTestStatus.textContent = "校准已确认。如需重测，请先重置校准。";
     return;
   }
 
