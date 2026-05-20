@@ -122,9 +122,11 @@ const BLINK_SYMBOLS = {
   shortMinMs: 100,
   shortMaxMs: 500,
   longMinMs: 700,
-  longMaxMs: 2000,
-  restMinMs: 2500,
+  longMaxMs: 2800,
+  restMinMs: 3500,
   decodeDelayMs: 1200,
+  longSequenceDecodeDelayMs: 2200,
+  separatedLongWindowMs: 6000,
 };
 
 const DIRECT_BLINK_CODES = {
@@ -225,6 +227,7 @@ const state = {
   blinkCodeStartedAt: null,
   blinkCodeLastAt: null,
   blinkCodeDurations: [],
+  pendingSeparatedLongAt: 0,
   fpsSamples: [],
   lastFps: null,
   lastSignals: null,
@@ -251,6 +254,7 @@ const state = {
     confirmed: false,
     completedStepIds: [],
     activeTestCode: "",
+    guidedRestFirstLongAt: 0,
     guidedTestResults: {},
     samples: {
       openEar: [],
@@ -773,6 +777,10 @@ function clearBlinkCodeBuffer() {
   updateCodeBuffer();
 }
 
+function clearSeparatedLongBlink() {
+  state.pendingSeparatedLongAt = 0;
+}
+
 function displayBlinkCode(code) {
   return code.replaceAll(".", "·").replaceAll("-", "—");
 }
@@ -1010,6 +1018,7 @@ function updateCalibrationUI() {
 function resetCalibration() {
   cancelSpeech();
   clearBlinkCodeBuffer();
+  clearSeparatedLongBlink();
   clearPendingConfirmation();
   resetGestureSequences();
   clearSavedCalibrationProfile();
@@ -1020,6 +1029,7 @@ function resetCalibration() {
   state.calibration.confirmed = false;
   state.calibration.completedStepIds = [];
   state.calibration.activeTestCode = "";
+  state.calibration.guidedRestFirstLongAt = 0;
   state.calibration.guidedTestResults = {};
   state.calibration.samples.openEar = [];
   state.calibration.samples.closedEar = [];
@@ -1034,6 +1044,7 @@ function resetCalibration() {
 function startCalibrationGuide() {
   cancelSpeech();
   clearBlinkCodeBuffer();
+  clearSeparatedLongBlink();
   clearPendingConfirmation();
   resetGestureSequences();
   state.calibration.active = true;
@@ -1043,6 +1054,7 @@ function startCalibrationGuide() {
   state.calibration.confirmed = false;
   state.calibration.completedStepIds = [];
   state.calibration.activeTestCode = "";
+  state.calibration.guidedRestFirstLongAt = 0;
   state.calibration.guidedTestResults = {};
   state.calibration.samples.openEar = [];
   state.calibration.samples.closedEar = [];
@@ -1265,8 +1277,10 @@ function startGuidedTest() {
   }
 
   clearBlinkCodeBuffer();
+  clearSeparatedLongBlink();
   clearPendingConfirmation();
   resetGestureSequences();
+  state.calibration.guidedRestFirstLongAt = 0;
   state.calibration.activeTestCode = guidedTestSelect.value;
   guidedTestStatus.textContent = `等待输入：${displayBlinkCode(state.calibration.activeTestCode)}`;
   addLog(`开始测试短码 ${state.calibration.activeTestCode}`);
@@ -1279,6 +1293,33 @@ function recordGuidedTestCode(code, { overflowed = false } = {}) {
   }
 
   const expected = state.calibration.activeTestCode;
+  if (expected === "--" && code === "-" && !overflowed) {
+    const now = performance.now();
+    const hasFirstLong =
+      state.calibration.guidedRestFirstLongAt &&
+      now - state.calibration.guidedRestFirstLongAt <= BLINK_SYMBOLS.separatedLongWindowMs;
+
+    if (!hasFirstLong) {
+      state.calibration.guidedRestFirstLongAt = now;
+      updatePendingTestRecord({
+        expected,
+        received: "-",
+        correct: null,
+        note: "guided_test_waiting_second_long_blink",
+      });
+      guidedTestStatus.textContent = "已收到第一次长闭眼，请在 6 秒内再做一次长闭眼。";
+      addLog("两次长闭眼测试：已收到第一次长闭眼，等待第二次");
+      finishPendingTestRecord();
+      updateCalibrationUI();
+      return true;
+    }
+
+    state.calibration.guidedRestFirstLongAt = 0;
+    code = "--";
+  } else {
+    state.calibration.guidedRestFirstLongAt = 0;
+  }
+
   const ok = !overflowed && code === expected;
   updatePendingTestRecord({
     expected,
@@ -1355,6 +1396,37 @@ function startConfirmation(config) {
     expiresAt: performance.now() + CONFIRMATION_TIMEOUT_MS,
   };
   announce(config.prompt, config.label, { shouldSpeak: true });
+}
+
+function resolveSeparatedLongBlinkRest(code) {
+  if (code !== "-" || !hasConfirmedCalibration()) {
+    return false;
+  }
+
+  const now = performance.now();
+  const hasFirstLong =
+    state.pendingSeparatedLongAt && now - state.pendingSeparatedLongAt <= BLINK_SYMBOLS.separatedLongWindowMs;
+
+  if (!hasFirstLong) {
+    state.pendingSeparatedLongAt = now;
+    setCommunicationMessage("已收到一次长闭眼；6 秒内再做一次会进入休息。", "休息 1/2");
+    addLog("一次长闭眼：等待第二次长闭眼触发休息");
+    finishPendingTestRecord({ note: "waiting_second_long_blink_for_rest" });
+    return true;
+  }
+
+  clearSeparatedLongBlink();
+  updatePendingTestRecord({
+    code: "--",
+    received: "--",
+    label: `短码 ${displayBlinkCode("--")}`,
+  });
+  const phrase = DIRECT_BLINK_CODES["--"];
+  announce(phrase.text, `短码 ${displayBlinkCode("--")}`, {
+    shouldSpeak: phrase.speak,
+  });
+  pauseRecognition(phrase.pauseMs, { preserveMessage: true });
+  return true;
 }
 
 function resolvePendingConfirmation(code) {
@@ -1436,19 +1508,25 @@ function decodeBlinkCode() {
   }
 
   if (code === ".") {
+    clearSeparatedLongBlink();
     addLog("忽略单次短眨");
     finishPendingTestRecord({ note: "single_short_blink_ignored" });
     return;
   }
 
   if (code === "-") {
-    addLog("忽略单次长闭眼（仅确认场景中用于取消）");
+    if (resolveSeparatedLongBlinkRest(code)) {
+      return;
+    }
+
+    addLog("忽略单次长闭眼（仅确认场景中用于取消；校准后两次长闭眼用于休息）");
     finishPendingTestRecord({ note: "single_long_blink_ignored" });
     return;
   }
 
   const confirmation = CONFIRMATION_BLINK_CODES[code];
   if (confirmation) {
+    clearSeparatedLongBlink();
     if (!hasConfirmedCalibration()) {
       setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成并确认引导校准后才进入确认流程。`, "未确认");
       addLog(`短码 ${displayBlinkCode(code)} 已识别，因引导校准未确认而未进入确认流程`);
@@ -1462,6 +1540,7 @@ function decodeBlinkCode() {
 
   const phrase = DIRECT_BLINK_CODES[code];
   if (phrase) {
+    clearSeparatedLongBlink();
     if (!hasConfirmedCalibration()) {
       setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成并确认引导校准后才播报短语。`, "未确认");
       addLog(`短码 ${displayBlinkCode(code)} 已识别，因引导校准未确认而未播报`);
@@ -1512,12 +1591,16 @@ function enqueueBlinkSymbol(symbol, meta = {}) {
 
   updateCodeBuffer();
   window.clearTimeout(state.blinkDecodeTimer);
-  state.blinkDecodeTimer = window.setTimeout(decodeBlinkCode, BLINK_SYMBOLS.decodeDelayMs);
+  const decodeDelay = state.blinkCodeBuffer.includes("-")
+    ? BLINK_SYMBOLS.longSequenceDecodeDelayMs
+    : BLINK_SYMBOLS.decodeDelayMs;
+  state.blinkDecodeTimer = window.setTimeout(decodeBlinkCode, decodeDelay);
 }
 
 function pauseRecognition(durationMs = 5 * 60 * 1000, { preserveMessage = false } = {}) {
   state.pausedUntil = performance.now() + durationMs;
   clearBlinkCodeBuffer();
+  clearSeparatedLongBlink();
   clearPendingConfirmation();
   resetGestureSequences();
   resetDetectionWindow();
@@ -1529,6 +1612,7 @@ function pauseRecognition(durationMs = 5 * 60 * 1000, { preserveMessage = false 
 
 function resumeRecognition() {
   state.pausedUntil = 0;
+  clearSeparatedLongBlink();
   clearPendingConfirmation();
   pauseRecognitionButton.querySelector("span").textContent = "暂停";
   setCommunicationMessage("等待输入", "继续");
