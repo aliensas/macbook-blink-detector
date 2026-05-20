@@ -285,6 +285,10 @@ canvas {
   display: none !important;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 /* ── Camera Actions ──────────────────────────────────────── */
 .camera-actions {
   flex: 0 0 auto;
@@ -868,7 +872,7 @@ input[type="range"] {
 .calibration-actions,
 .guided-test {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 8px;
 }
 
@@ -1064,7 +1068,7 @@ input[type="range"] {
 
 /* ── Event Log ──────────────────────────────────────────── */
 .event-log {
-  display: grid;
+  display: none;
   gap: 6px;
   min-height: 110px;
   align-content: start;
@@ -1074,6 +1078,10 @@ input[type="range"] {
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border-bright) transparent;
+}
+
+.engineering-mode .event-log {
+  display: grid;
 }
 
 .event {
@@ -1440,7 +1448,7 @@ input[type="range"] {
   }
 
   .calibration-actions {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
   }
 
   .calibration-actions .compact-action {
@@ -1679,7 +1687,7 @@ input[type="range"] {
   }
 
   .calibration-actions {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
   }
 
   .calibration-actions .compact-action {

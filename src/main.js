@@ -77,6 +77,7 @@ const recordingMarkCorrectButton = document.querySelector("#recordingMarkCorrect
 const recordingMarkWrongButton = document.querySelector("#recordingMarkWrongButton");
 const recordingExportJsonButton = document.querySelector("#recordingExportJsonButton");
 const recordingExportCsvButton = document.querySelector("#recordingExportCsvButton");
+const engineerPanel = document.querySelector(".engineer-panel");
 
 const APP_BASE_URL = new URL(import.meta.env.BASE_URL, window.location.href);
 const MODEL_URL = new URL("mediapipe/models/face_landmarker.task", APP_BASE_URL).toString();
@@ -85,6 +86,9 @@ const SERVICE_WORKER_URL = new URL("sw.js", APP_BASE_URL).toString();
 const ENGINEERING_MODE = new URLSearchParams(window.location.search).has("debug");
 
 document.documentElement.classList.toggle("engineering-mode", ENGINEERING_MODE);
+if (engineerPanel) {
+  engineerPanel.open = ENGINEERING_MODE;
+}
 
 const BUILT_IN_CAMERA_HINTS = [
   "macbook",
@@ -963,6 +967,13 @@ function updateCalibrationUI() {
   const isTestStep = step.kind === "test";
   const activeCalibrationStepIndex = Math.max(1, state.calibration.stepIndex);
   const activeCalibrationStepCount = CALIBRATION_STEPS.length - 1;
+  const isConfirmed = state.calibration.confirmed;
+  const isWaitingForCamera =
+    state.calibration.active &&
+    !state.running &&
+    !isConfirmed &&
+    step.kind !== "check" &&
+    step.kind !== "test";
   const canCollect =
     state.calibration.active &&
     state.running &&
@@ -979,14 +990,25 @@ function updateCalibrationUI() {
     isTestStep &&
     hasCompletedCoreCalibration() &&
     !state.calibration.activeTestCode &&
-    !state.calibration.confirmed;
+    !isConfirmed;
   calibrationStatus.textContent = state.calibration.active
-    ? state.calibration.confirmed
+    ? isConfirmed
       ? "已确认"
       : `${activeCalibrationStepIndex}/${activeCalibrationStepCount}${state.calibration.collecting ? " 采集中" : ""}`
     : "未开始";
-  calibrationTitle.textContent = step.title;
-  calibrationInstruction.textContent = step.instruction;
+  if (!state.calibration.active) {
+    calibrationTitle.textContent = "准备校准";
+    calibrationInstruction.textContent = "先点击摄像头区域的“启动”，确认人脸完整、光线稳定后点击“开始校准”。";
+  } else if (isConfirmed) {
+    calibrationTitle.textContent = "校准已完成";
+    calibrationInstruction.textContent = "可以开始通信输入；同一患者下次打开会自动沿用，状态变化明显时再重新校准。";
+  } else if (isWaitingForCamera) {
+    calibrationTitle.textContent = step.title;
+    calibrationInstruction.textContent = "请先点击摄像头区域的“启动”并允许摄像头权限，看到人脸后再采集。";
+  } else {
+    calibrationTitle.textContent = step.title;
+    calibrationInstruction.textContent = step.instruction;
+  }
   calibrationProgress.style.width = isTestStep
     ? hasCompletedCoreCalibration()
       ? "100%"
@@ -994,19 +1016,25 @@ function updateCalibrationUI() {
     : complete
       ? "100%"
       : "0%";
-  calibrationStartButton.textContent = state.calibration.active ? "重新校准" : "开始";
-  calibrationCollectButton.textContent = state.calibration.collecting
-    ? "采集中"
-    : step.kind === "blink"
-      ? "开始记录"
-      : "采集";
+  calibrationStartButton.textContent = state.calibration.active ? "重新校准" : "开始校准";
+  calibrationCollectButton.textContent = isWaitingForCamera
+    ? "等待摄像头"
+    : state.calibration.collecting
+      ? "采集中"
+      : step.kind === "blink"
+        ? "开始记录"
+        : "采集";
+  calibrationCollectButton.hidden =
+    !state.calibration.active || isConfirmed || isTestStep || step.kind === "check";
   calibrationCollectButton.disabled = !canCollect;
+  calibrationNextButton.hidden = !state.calibration.active || !isTestStep || isConfirmed;
   calibrationNextButton.textContent = isTestStep
-    ? state.calibration.confirmed
+    ? isConfirmed
       ? "已确认"
       : "完成确认"
     : "下一步";
   calibrationNextButton.disabled = isTestStep ? !canConfirm : !canAdvance;
+  calibrationResetButton.hidden = !state.calibration.active;
   guidedTestSelect.disabled =
     !state.calibration.active || !isTestStep || Boolean(state.calibration.activeTestCode);
   guidedTestButton.disabled =
@@ -1038,7 +1066,7 @@ function resetCalibration() {
   state.calibration.samples.shortBlinkDurations = [];
   state.calibration.samples.longBlinkDurations = [];
   calibratedThresholdResult.textContent = "--";
-  guidedTestStatus.textContent = "校准已重置。点击“开始”后按提示采集。";
+  guidedTestStatus.textContent = "校准已重置。点击“开始校准”后按提示采集。";
   updateCalibrationUI();
   addLog("引导校准已重置，本地校准档案已清除");
 }
@@ -1066,7 +1094,7 @@ function startCalibrationGuide() {
   markCalibrationStepComplete("position");
   guidedTestStatus.textContent = state.running
     ? "请保持自然睁眼，准备好后点击“采集”。"
-    : "请先启动摄像头，再点击“采集”。";
+    : "请先点击摄像头区域的“启动”，看到人脸后再采集。";
   updateCalibrationUI();
   addLog("引导校准已开始");
 }
