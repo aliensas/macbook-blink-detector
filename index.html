@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#080c14" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="ALS AAC" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta
+      name="description"
+      content="ALS 面部微动作 AAC 输入原型，用摄像头识别低疲劳面部动作和眨眼短码。"
+    />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <title>ALS 面部微动作 AAC 输入原型</title>
+    <script type="module" crossorigin src="./assets/index-MUTm7s1H.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CRwlecgm.css">
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Personalized Low-Fatigue AAC</p>
+          <h1>面部微动作 AAC 输入原型</h1>
+        </div>
+        <div class="status-pill" id="runtimeStatus">
+          <span class="dot dot-idle"></span>
+          <span>待启动</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <section class="camera-panel" aria-label="摄像头预览">
+          <div class="video-shell">
+            <video id="cameraVideo" playsinline muted></video>
+            <canvas id="overlayCanvas"></canvas>
+            <div class="video-shell-emergency" id="emergencyOverlay"></div>
+            <div class="video-empty" id="videoEmpty">
+              <i data-lucide="camera"></i>
+              <span>等待摄像头</span>
+            </div>
+          </div>
+          <div class="camera-actions">
+            <button class="primary-action" id="startButton" type="button" title="启动摄像头">
+              <i data-lucide="play"></i>
+              <span>启动</span>
+            </button>
+            <button class="ghost-action" id="stopButton" type="button" title="停止摄像头" disabled>
+              <i data-lucide="square"></i>
+              <span>停止</span>
+            </button>
+            <button class="ghost-action icon-only" id="resetButton" type="button" title="清零计数">
+              <i data-lucide="rotate-ccw"></i>
+            </button>
+          </div>
+          <div class="communication-panel" aria-label="通信输出">
+            <div class="message-display">
+              <span class="metric-label">通信输出</span>
+              <strong id="messageText">等待输入</strong>
+              <span id="codeBuffer" class="code-buffer">--</span>
+            </div>
+            <div class="speech-actions">
+              <button class="ghost-action compact-action" id="repeatSpeechButton" type="button" title="重播语音">
+                <i data-lucide="volume-2"></i>
+                <span>重播</span>
+              </button>
+              <button class="ghost-action compact-action" id="clearSpeechButton" type="button" title="清空通信文本并停止播报">
+                <i data-lucide="trash-2"></i>
+                <span>清空</span>
+              </button>
+              <button class="ghost-action compact-action" id="pauseRecognitionButton" type="button" title="暂停识别">
+                <i data-lucide="pause"></i>
+                <span>暂停</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <aside class="control-panel" aria-label="检测控制">
+          <div class="metric-grid">
+            <div class="metric">
+              <span class="metric-label">眨眼</span>
+              <strong id="blinkCount">0</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">状态</span>
+              <strong id="blinkState">未检测</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">EAR</span>
+              <strong id="earValue">--</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">FPS</span>
+              <strong id="fpsValue">--</strong>
+            </div>
+          </div>
+
+          <div class="signal-panel">
+            <div class="signal-header">
+              <span>眼睛开合</span>
+              <span id="confidenceLabel">--</span>
+            </div>
+            <div class="signal-track">
+              <div class="signal-fill" id="earBar"></div>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label for="cameraSelect">摄像头</label>
+            <select id="cameraSelect"></select>
+          </div>
+
+          <div class="control-group">
+            <div class="label-row">
+              <label for="thresholdRange">眨眼阈值</label>
+              <output id="thresholdValue" for="thresholdRange">0.22</output>
+            </div>
+            <input id="thresholdRange" type="range" min="0.14" max="0.34" value="0.22" step="0.01" />
+          </div>
+
+          <div class="control-group">
+            <div class="label-row">
+              <label for="holdFramesRange">闭眼帧数</label>
+              <output id="holdFramesValue" for="holdFramesRange">3</output>
+            </div>
+            <input id="holdFramesRange" type="range" min="2" max="8" value="3" step="1" />
+          </div>
+
+          <div class="switch-row">
+            <label class="switch">
+              <input id="overlayToggle" type="checkbox" checked />
+              <span></span>
+            </label>
+            <span>面部描边</span>
+          </div>
+
+          <div class="gesture-panel" aria-label="动作信号">
+            <div class="gesture-header">
+              <span>可选动作</span>
+              <span id="lastGesture">--</span>
+            </div>
+            <div class="gesture-bars">
+              <div class="gesture-row">
+                <span>抬眉确认</span>
+                <meter id="browMeter" min="0" max="1" value="0"></meter>
+                <strong id="browValue">0.00</strong>
+              </div>
+              <div class="gesture-row">
+                <span>张嘴吸痰</span>
+                <meter id="mouthMeter" min="0" max="1" value="0"></meter>
+                <strong id="mouthValue">0.00</strong>
+              </div>
+              <div class="gesture-row">
+                <span>微笑表达</span>
+                <meter id="smileMeter" min="0" max="1" value="0"></meter>
+                <strong id="smileValue">0.00</strong>
+              </div>
+              <div class="gesture-row">
+                <span>摇头取消</span>
+                <meter id="headMeter" min="0" max="1" value="0"></meter>
+                <strong id="headValue">0.00</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label>输入</label>
+            <div class="toggle-grid">
+              <label><input id="blinkCodeToggle" type="checkbox" checked />眨眼短码</label>
+              <label><input id="browToggle" type="checkbox" />抬眉确认</label>
+              <label><input id="mouthToggle" type="checkbox" />张嘴吸痰</label>
+              <label><input id="headShakeToggle" type="checkbox" />摇头取消</label>
+              <label><input id="smileToggle" type="checkbox" />微笑表达</label>
+              <label><input id="ttsToggle" type="checkbox" checked />语音</label>
+            </div>
+          </div>
+
+          <div class="calibration-panel" aria-label="引导校准">
+            <div class="calibration-header">
+              <span>引导校准</span>
+              <span id="calibrationStatus">未开始</span>
+            </div>
+            <strong id="calibrationTitle">准备画面</strong>
+            <p id="calibrationInstruction">启动摄像头后，按提示采集睁眼、闭眼、短眨和长闭眼样本；核心校准完成后即可确认。</p>
+            <div class="calibration-progress">
+              <div id="calibrationProgress"></div>
+            </div>
+            <div class="calibration-actions">
+              <button class="ghost-action compact-action" id="calibrationStartButton" type="button">开始</button>
+              <button class="ghost-action compact-action" id="calibrationCollectButton" type="button">采集</button>
+              <button class="ghost-action compact-action" id="calibrationNextButton" type="button">下一步</button>
+              <button class="ghost-action compact-action" id="calibrationResetButton" type="button">重置</button>
+            </div>
+            <div class="calibration-results">
+              <span>睁眼 <strong id="openEarResult">--</strong></span>
+              <span>闭眼 <strong id="closedEarResult">--</strong></span>
+              <span>阈值 <strong id="calibratedThresholdResult">--</strong></span>
+              <span>短眨 <strong id="shortBlinkResult">--</strong></span>
+              <span>长闭眼 <strong id="longBlinkResult">--</strong></span>
+            </div>
+          </div>
+
+          <details class="engineer-panel" aria-label="工程测试">
+            <summary>
+              <span>工程测试</span>
+              <small>短码验证与记录导出</small>
+            </summary>
+            <div class="engineer-panel-body">
+              <div class="guided-test">
+                <select id="guidedTestSelect" aria-label="短码测试项">
+                  <option value=".">单次短眨：应忽略</option>
+                  <option value="-">单次长闭眼：单独不播报</option>
+                  <option value="..">两次短眨：校准后喝水/润口</option>
+                  <option value="...">三次短眨：校准后紧急求助</option>
+                  <option value="--">两次长闭眼：校准后休息（6 秒内）</option>
+                  <option value=".-">短眨+长闭眼：口腔确认</option>
+                  <option value="-.">长闭眼+短眨：体位确认</option>
+                </select>
+                <button class="ghost-action compact-action" id="guidedTestButton" type="button">测试</button>
+              </div>
+              <p id="guidedTestStatus" class="guided-test-status">工程测试未启动</p>
+
+              <div class="recording-panel" aria-label="测试记录">
+                <div class="recording-header">
+                  <span>测试记录</span>
+                  <span id="recordingStatus">未记录</span>
+                </div>
+                <div class="recording-metrics">
+                  <span>条目 <strong id="recordingCount">0</strong></span>
+                  <span>正确率 <strong id="recordingAccuracy">--</strong></span>
+                  <span>文字延迟 <strong id="recordingLatency">--</strong></span>
+                </div>
+                <div class="recording-expected">
+                  <label for="recordingExpectedSelect">预期动作</label>
+                  <select id="recordingExpectedSelect">
+                    <option value="">未指定</option>
+                    <option value=".">单次短眨</option>
+                    <option value="-">单次长闭眼</option>
+                    <option value="..">两次短眨</option>
+                    <option value="...">三次短眨</option>
+                    <option value="--">两次长闭眼（6 秒内）</option>
+                    <option value=".-">短眨+长闭眼</option>
+                    <option value="-.">长闭眼+短眨</option>
+                    <option value="BROW_RAISE">抬眉</option>
+                    <option value="MOUTH_OPEN">张嘴</option>
+                    <option value="SMILE">微笑</option>
+                    <option value="HEAD_SHAKE">摇头</option>
+                  </select>
+                </div>
+                <div class="recording-actions">
+                  <button class="ghost-action compact-action" id="recordingStartButton" type="button">
+                    <i data-lucide="circle"></i>
+                    <span>开始记录</span>
+                  </button>
+                  <button class="ghost-action compact-action" id="recordingStopButton" type="button" disabled>
+                    <i data-lucide="square"></i>
+                    <span>停止</span>
+                  </button>
+                  <button class="ghost-action compact-action" id="recordingMarkCorrectButton" type="button" disabled>正确</button>
+                  <button class="ghost-action compact-action" id="recordingMarkWrongButton" type="button" disabled>错误</button>
+                  <button class="ghost-action compact-action" id="recordingExportJsonButton" type="button" disabled>
+                    <i data-lucide="download"></i>
+                    <span>JSON</span>
+                  </button>
+                  <button class="ghost-action compact-action" id="recordingExportCsvButton" type="button" disabled>
+                    <i data-lucide="download"></i>
+                    <span>CSV</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </details>
+
+          <div class="diagnostic-panel hidden" id="diagnosticPanel">
+            <div>
+              <strong id="diagnosticTitle">摄像头未启动</strong>
+              <p id="diagnosticMessage"></p>
+            </div>
+            <button class="ghost-action compact-action" id="copyUrlButton" type="button" title="复制本地地址">
+              <i data-lucide="copy"></i>
+              <span>复制地址</span>
+            </button>
+          </div>
+
+          <div class="event-log" id="eventLog" aria-live="polite"></div>
+        </aside>
+      </main>
+    </div>
+  </body>
+</html>
