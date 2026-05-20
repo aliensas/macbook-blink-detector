@@ -167,39 +167,39 @@ const CALIBRATION_STEPS = [
   {
     id: "open",
     title: "2. 自然睁眼基线",
-    instruction: "保持自然睁眼 3 秒，系统会采集 EAR 基线。",
+    instruction: "保持自然睁眼，点击“采集”，系统会采集 2 秒 EAR 基线。",
     kind: "ear",
     sampleKey: "openEar",
-    durationMs: 3000,
+    durationMs: 2000,
   },
   {
     id: "closed",
     title: "3. 轻闭眼基线",
-    instruction: "轻轻闭眼 2 秒，系统会采集闭眼 EAR，并更新眨眼阈值。",
+    instruction: "轻轻闭眼，点击“采集”，系统会采集 1.5 秒闭眼 EAR，并更新眨眼阈值。",
     kind: "ear",
     sampleKey: "closedEar",
-    durationMs: 2000,
+    durationMs: 1500,
   },
   {
     id: "short",
     title: "4. 主动短眨样本",
-    instruction: "做 5 次低疲劳短眨，每次间隔约 1 秒。",
+    instruction: "点击“采集”后做 3 次低疲劳短眨，每次间隔约 1 秒。",
     kind: "blink",
     sampleKey: "shortBlinkDurations",
-    targetCount: 5,
+    targetCount: 3,
   },
   {
     id: "long",
     title: "5. 长闭眼样本",
-    instruction: "做 2 次可控长闭眼，不要勉强。",
+    instruction: "点击“采集”后做 1 次可控长闭眼，不要勉强。",
     kind: "blink",
     sampleKey: "longBlinkDurations",
-    targetCount: 2,
+    targetCount: 1,
   },
   {
     id: "review",
-    title: "6. 测试短码并确认",
-    instruction: "逐项测试下方短码；通过后系统会自动切到下一项。全部通过后点击“完成确认”，确认前不会执行真实短语播报或动作映射。",
+    title: "6. 确认校准",
+    instruction: "核心校准完成后即可点击“完成确认”。下方短码测试是可选验证，用来继续观察误触和准确率。",
     kind: "test",
   },
 ];
@@ -890,10 +890,6 @@ function loadSavedCalibrationProfile() {
   }
 
   const savedGuidedResults = guidedTestResultsForSavedProfile(payload.guidedTestResults);
-  if (!GUIDED_TEST_CODES.every((code) => savedGuidedResults[code]?.passed)) {
-    addLog("本地校准档案不完整，已忽略");
-    return false;
-  }
 
   const threshold = Number(payload.threshold);
   if (Number.isFinite(threshold)) {
@@ -954,6 +950,12 @@ function updateCalibrationUI() {
   const step = currentCalibrationStep();
   const complete = isCalibrationStepComplete(step.id);
   const isTestStep = step.kind === "test";
+  const canCollect =
+    state.calibration.active &&
+    state.running &&
+    !state.calibration.collecting &&
+    step.kind !== "check" &&
+    step.kind !== "test";
   const canAdvance =
     state.calibration.active &&
     !state.calibration.collecting &&
@@ -963,7 +965,6 @@ function updateCalibrationUI() {
     state.calibration.active &&
     isTestStep &&
     hasCompletedCoreCalibration() &&
-    hasCompletedGuidedTests() &&
     !state.calibration.activeTestCode &&
     !state.calibration.confirmed;
   calibrationStatus.textContent = state.calibration.active
@@ -974,12 +975,19 @@ function updateCalibrationUI() {
   calibrationTitle.textContent = step.title;
   calibrationInstruction.textContent = step.instruction;
   calibrationProgress.style.width = isTestStep
-    ? `${Math.round((guidedTestPassedCount() / GUIDED_TEST_CODES.length) * 100)}%`
+    ? hasCompletedCoreCalibration()
+      ? "100%"
+      : `${Math.round((guidedTestPassedCount() / GUIDED_TEST_CODES.length) * 100)}%`
     : complete
       ? "100%"
       : "0%";
-  calibrationCollectButton.disabled =
-    !state.calibration.active || state.calibration.collecting || step.kind === "check" || step.kind === "test";
+  calibrationStartButton.textContent = state.calibration.active ? "重新校准" : "开始";
+  calibrationCollectButton.textContent = state.calibration.collecting
+    ? "采集中"
+    : step.kind === "blink"
+      ? "开始记录"
+      : "采集";
+  calibrationCollectButton.disabled = !canCollect;
   calibrationNextButton.textContent = isTestStep
     ? state.calibration.confirmed
       ? "已确认"
@@ -1016,7 +1024,7 @@ function resetCalibration() {
   state.calibration.samples.shortBlinkDurations = [];
   state.calibration.samples.longBlinkDurations = [];
   calibratedThresholdResult.textContent = "--";
-  guidedTestStatus.textContent = "未开始测试";
+  guidedTestStatus.textContent = "校准已重置。点击“开始”后按提示采集。";
   updateCalibrationUI();
   addLog("引导校准已重置，本地校准档案已清除");
 }
@@ -1027,7 +1035,7 @@ function startCalibrationGuide() {
   clearPendingConfirmation();
   resetGestureSequences();
   state.calibration.active = true;
-  state.calibration.stepIndex = 0;
+  state.calibration.stepIndex = CALIBRATION_STEPS.findIndex((step) => step.id === "open");
   state.calibration.collecting = false;
   state.calibration.collectStartedAt = 0;
   state.calibration.confirmed = false;
@@ -1039,10 +1047,39 @@ function startCalibrationGuide() {
   state.calibration.samples.shortBlinkDurations = [];
   state.calibration.samples.longBlinkDurations = [];
   calibratedThresholdResult.textContent = "--";
-  guidedTestStatus.textContent = "未开始测试";
   markCalibrationStepComplete("position");
+  guidedTestStatus.textContent = state.running
+    ? "请保持自然睁眼，准备好后点击“采集”。"
+    : "请先启动摄像头，再点击“采集”。";
   updateCalibrationUI();
   addLog("引导校准已开始");
+}
+
+function prepareCurrentCalibrationStep() {
+  const step = currentCalibrationStep();
+  if (step.kind === "test") {
+    const nextCode = GUIDED_TEST_CODES.find((testCode) => !state.calibration.guidedTestResults[testCode]?.passed);
+    if (nextCode) {
+      guidedTestSelect.value = nextCode;
+    }
+    guidedTestStatus.textContent = hasCompletedGuidedTests()
+      ? "短码测试已全部通过，也可以重新选择项目复测。"
+      : `核心校准完成，可直接点“完成确认”。短码测试可选，当前进度 ${guidedTestProgressText()}。`;
+    return;
+  }
+
+  guidedTestStatus.textContent =
+    step.kind === "blink"
+      ? `${step.title}：点击“开始记录”后按提示做动作。`
+      : `${step.title}：准备好后点击“采集”。`;
+}
+
+function advanceToNextCalibrationStep() {
+  state.calibration.collecting = false;
+  calibrationProgress.classList.remove("is-collecting");
+  state.calibration.stepIndex = Math.min(state.calibration.stepIndex + 1, CALIBRATION_STEPS.length - 1);
+  prepareCurrentCalibrationStep();
+  updateCalibrationUI();
 }
 
 function moveToNextCalibrationStep() {
@@ -1064,15 +1101,11 @@ function moveToNextCalibrationStep() {
       return;
     }
 
-    if (!hasCompletedGuidedTests()) {
-      guidedTestStatus.textContent = `短码测试进度 ${guidedTestProgressText()}，请先完成全部测试项。`;
-      addLog(`短码测试未完成：${guidedTestProgressText()}`);
-      return;
-    }
-
     markCalibrationStepComplete(step.id);
     state.calibration.confirmed = true;
-    guidedTestStatus.textContent = "全部短码测试已通过，校准已确认。";
+    guidedTestStatus.textContent = hasCompletedGuidedTests()
+      ? "全部短码测试已通过，校准已确认。"
+      : `校准已确认。短码测试进度 ${guidedTestProgressText()}，后续可在测试记录中继续评估。`;
     setCommunicationMessage("校准已确认，可以开始通信输入。", "校准完成");
     addLog("引导校准已确认完成");
     saveCalibrationProfile();
@@ -1085,27 +1118,28 @@ function moveToNextCalibrationStep() {
     return;
   }
 
-  state.calibration.collecting = false;
-  calibrationProgress.classList.remove("is-collecting");
-  state.calibration.stepIndex = Math.min(state.calibration.stepIndex + 1, CALIBRATION_STEPS.length - 1);
-  if (currentCalibrationStep().kind === "test") {
-    const nextCode = GUIDED_TEST_CODES.find((testCode) => !state.calibration.guidedTestResults[testCode]?.passed);
-    if (nextCode) {
-      guidedTestSelect.value = nextCode;
-    }
-    guidedTestStatus.textContent = `短码测试进度 ${guidedTestProgressText()}，选择测试项后点击“测试”。`;
-  }
-  updateCalibrationUI();
+  advanceToNextCalibrationStep();
 }
 
 function beginCalibrationCollection() {
+  if (!state.calibration.active) {
+    startCalibrationGuide();
+  }
+
   if (!state.running) {
+    guidedTestStatus.textContent = "请先启动摄像头，再采集校准样本。";
     addLog("请先启动摄像头再采集校准样本");
     return;
   }
 
   const step = currentCalibrationStep();
-  if (step.kind === "check" || step.kind === "test") {
+  if (step.kind === "check") {
+    advanceToNextCalibrationStep();
+    return;
+  }
+
+  if (step.kind === "test") {
+    guidedTestStatus.textContent = "核心校准已完成，可直接点“完成确认”。短码测试是可选验证。";
     return;
   }
 
@@ -1117,6 +1151,10 @@ function beginCalibrationCollection() {
   }
   calibrationProgress.style.width = "0%";
   calibrationProgress.classList.add("is-collecting");
+  guidedTestStatus.textContent =
+    step.kind === "blink"
+      ? `${step.title}采集中，请按提示做动作。`
+      : `${step.title}采集中，请保持姿势。`;
   addLog(`开始采集：${step.title}`);
   updateCalibrationUI();
 }
@@ -1155,6 +1193,10 @@ function finishCalibrationCollection() {
   }
   updateCalibrationUI();
   addLog(`完成采集：${step.title}`);
+
+  if (state.calibration.stepIndex < CALIBRATION_STEPS.length - 1) {
+    advanceToNextCalibrationStep();
+  }
 }
 
 function collectCalibrationFrame(signals, now) {
@@ -1252,9 +1294,9 @@ function recordGuidedTestCode(code, { overflowed = false } = {}) {
     const nextCode = GUIDED_TEST_CODES.find((testCode) => !state.calibration.guidedTestResults[testCode]?.passed);
     if (nextCode) {
       guidedTestSelect.value = nextCode;
-      guidedTestStatus.textContent = `通过：收到 ${displayBlinkCode(code)}。进度 ${guidedTestProgressText()}，已切到下一项 ${displayBlinkCode(nextCode)}，请点“测试”。`;
+      guidedTestStatus.textContent = `通过：收到 ${displayBlinkCode(code)}。可点“完成确认”，也可继续测试 ${displayBlinkCode(nextCode)}。进度 ${guidedTestProgressText()}。`;
     } else {
-      guidedTestStatus.textContent = "全部短码测试已通过，请点“完成确认”。";
+      guidedTestStatus.textContent = "全部短码测试已通过，可以点击“完成确认”。";
     }
   } else {
     guidedTestStatus.textContent = `不匹配：期望 ${displayBlinkCode(expected)}，收到 ${overflowed ? "过长短码" : displayBlinkCode(code)}。请重新点“测试”。`;
