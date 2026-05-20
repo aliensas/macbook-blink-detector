@@ -215,6 +215,55 @@
             <p id="guidedTestStatus" class="guided-test-status">未开始测试</p>
           </div>
 
+          <div class="recording-panel" aria-label="测试记录">
+            <div class="recording-header">
+              <span>测试记录</span>
+              <span id="recordingStatus">未记录</span>
+            </div>
+            <div class="recording-metrics">
+              <span>条目 <strong id="recordingCount">0</strong></span>
+              <span>正确率 <strong id="recordingAccuracy">--</strong></span>
+              <span>文字延迟 <strong id="recordingLatency">--</strong></span>
+            </div>
+            <div class="recording-expected">
+              <label for="recordingExpectedSelect">预期动作</label>
+              <select id="recordingExpectedSelect">
+                <option value="">未指定</option>
+                <option value=".">单次短眨</option>
+                <option value="-">单次长闭眼</option>
+                <option value="..">两次短眨</option>
+                <option value="...">三次短眨</option>
+                <option value="--">两次长闭眼</option>
+                <option value=".-">短眨+长闭眼</option>
+                <option value="-.">长闭眼+短眨</option>
+                <option value="BROW_RAISE">抬眉</option>
+                <option value="MOUTH_OPEN">张嘴</option>
+                <option value="SMILE">微笑</option>
+                <option value="HEAD_SHAKE">摇头</option>
+              </select>
+            </div>
+            <div class="recording-actions">
+              <button class="ghost-action compact-action" id="recordingStartButton" type="button">
+                <i data-lucide="circle"></i>
+                <span>开始记录</span>
+              </button>
+              <button class="ghost-action compact-action" id="recordingStopButton" type="button" disabled>
+                <i data-lucide="square"></i>
+                <span>停止</span>
+              </button>
+              <button class="ghost-action compact-action" id="recordingMarkCorrectButton" type="button" disabled>正确</button>
+              <button class="ghost-action compact-action" id="recordingMarkWrongButton" type="button" disabled>错误</button>
+              <button class="ghost-action compact-action" id="recordingExportJsonButton" type="button" disabled>
+                <i data-lucide="download"></i>
+                <span>JSON</span>
+              </button>
+              <button class="ghost-action compact-action" id="recordingExportCsvButton" type="button" disabled>
+                <i data-lucide="download"></i>
+                <span>CSV</span>
+              </button>
+            </div>
+          </div>
+
           <div class="diagnostic-panel hidden" id="diagnosticPanel">
             <div>
               <strong id="diagnosticTitle">摄像头未启动</strong>

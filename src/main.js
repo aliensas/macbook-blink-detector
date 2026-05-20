@@ -1,8 +1,8 @@
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
-import { createIcons, Camera, Copy, Pause, Play, RotateCcw, Square, Trash2, Volume2 } from "lucide";
+import { createIcons, Camera, Circle, Copy, Download, Pause, Play, RotateCcw, Square, Trash2, Volume2 } from "lucide";
 import "./styles.css";
 
-createIcons({ icons: { Camera, Copy, Pause, Play, RotateCcw, Square, Trash2, Volume2 } });
+createIcons({ icons: { Camera, Circle, Copy, Download, Pause, Play, RotateCcw, Square, Trash2, Volume2 } });
 
 const video = document.querySelector("#cameraVideo");
 const canvas = document.querySelector("#overlayCanvas");
@@ -66,6 +66,17 @@ const longBlinkResult = document.querySelector("#longBlinkResult");
 const guidedTestSelect = document.querySelector("#guidedTestSelect");
 const guidedTestButton = document.querySelector("#guidedTestButton");
 const guidedTestStatus = document.querySelector("#guidedTestStatus");
+const recordingStatus = document.querySelector("#recordingStatus");
+const recordingCount = document.querySelector("#recordingCount");
+const recordingAccuracy = document.querySelector("#recordingAccuracy");
+const recordingLatency = document.querySelector("#recordingLatency");
+const recordingExpectedSelect = document.querySelector("#recordingExpectedSelect");
+const recordingStartButton = document.querySelector("#recordingStartButton");
+const recordingStopButton = document.querySelector("#recordingStopButton");
+const recordingMarkCorrectButton = document.querySelector("#recordingMarkCorrectButton");
+const recordingMarkWrongButton = document.querySelector("#recordingMarkWrongButton");
+const recordingExportJsonButton = document.querySelector("#recordingExportJsonButton");
+const recordingExportCsvButton = document.querySelector("#recordingExportCsvButton");
 
 const APP_BASE_URL = new URL(import.meta.env.BASE_URL, window.location.href);
 const MODEL_URL = new URL("mediapipe/models/face_landmarker.task", APP_BASE_URL).toString();
@@ -211,7 +222,12 @@ const state = {
   blinkCodeBuffer: [],
   blinkDecodeTimer: 0,
   blinkCodeOverflow: false,
+  blinkCodeStartedAt: null,
+  blinkCodeLastAt: null,
+  blinkCodeDurations: [],
   fpsSamples: [],
+  lastFps: null,
+  lastSignals: null,
   lastFrameAt: 0,
   cameraLabelsReady: false,
   pausedUntil: 0,
@@ -243,6 +259,15 @@ const state = {
       longBlinkDurations: [],
     },
   },
+  recording: {
+    active: false,
+    startedAt: 0,
+    stoppedAt: 0,
+    records: [],
+    nextId: 1,
+    pendingRecordId: null,
+    environment: null,
+  },
 };
 
 function setStatus(label, mode = "idle") {
@@ -273,6 +298,280 @@ function addLog(message) {
   while (eventLog.children.length > 5) {
     eventLog.lastElementChild.remove();
   }
+}
+
+function elapsedMs(time = performance.now()) {
+  return state.recording.startedAt ? Math.round(time - state.recording.startedAt) : 0;
+}
+
+function snapshotSignals() {
+  const signals = state.lastSignals || {};
+  return {
+    ear: Number.isFinite(signals.ear) ? Number(signals.ear.toFixed(4)) : null,
+    browUp: Number.isFinite(signals.browUp) ? Number(signals.browUp.toFixed(4)) : null,
+    mouthOpen: Number.isFinite(signals.mouthOpen) ? Number(signals.mouthOpen.toFixed(4)) : null,
+    smile: Number.isFinite(signals.smile) ? Number(signals.smile.toFixed(4)) : null,
+    headYaw: Number.isFinite(signals.headYaw) ? Number(signals.headYaw.toFixed(4)) : null,
+    hasFace: Boolean(signals.hasFace),
+  };
+}
+
+function averageRecorded(records, key) {
+  const values = records.map((record) => record[key]).filter((value) => Number.isFinite(value));
+  if (values.length === 0) {
+    return null;
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function updateRecordingUI() {
+  const records = state.recording.records;
+  const marked = records.filter((record) => typeof record.correct === "boolean");
+  const correct = marked.filter((record) => record.correct).length;
+  const averageDisplayLatency = averageRecorded(records, "displayLatencyFromActionEndMs");
+
+  recordingStatus.textContent = state.recording.active ? "记录中" : records.length > 0 ? "已停止" : "未记录";
+  recordingCount.textContent = records.length.toString();
+  recordingAccuracy.textContent = marked.length > 0 ? `${Math.round((correct / marked.length) * 100)}%` : "--";
+  recordingLatency.textContent =
+    averageDisplayLatency === null ? "--" : `${Math.round(averageDisplayLatency)}ms`;
+  recordingStartButton.disabled = state.recording.active;
+  recordingStopButton.disabled = !state.recording.active;
+  recordingMarkCorrectButton.disabled = records.length === 0;
+  recordingMarkWrongButton.disabled = records.length === 0;
+  recordingExportJsonButton.disabled = records.length === 0;
+  recordingExportCsvButton.disabled = records.length === 0;
+}
+
+function getRecordingEnvironment() {
+  const track = state.stream?.getVideoTracks?.()[0];
+  const settings = track?.getSettings?.() || {};
+  return {
+    pageUrl: window.location.href,
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    language: navigator.language,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+    },
+    cameraLabel: cameraSelect.selectedOptions[0]?.textContent || "",
+    cameraDeviceId: state.selectedDeviceId || "",
+    video: {
+      width: video.videoWidth || null,
+      height: video.videoHeight || null,
+      trackWidth: settings.width || null,
+      trackHeight: settings.height || null,
+      frameRate: settings.frameRate || null,
+      facingMode: settings.facingMode || null,
+    },
+    thresholds: {
+      blinkEar: Number(thresholdRange.value),
+      holdFrames: Number(holdFramesRange.value),
+    },
+  };
+}
+
+function startTestRecording() {
+  state.recording.active = true;
+  state.recording.startedAt = performance.now();
+  state.recording.stoppedAt = 0;
+  state.recording.records = [];
+  state.recording.nextId = 1;
+  state.recording.pendingRecordId = null;
+  state.recording.environment = getRecordingEnvironment();
+  updateRecordingUI();
+  addLog("测试记录已开始");
+}
+
+function stopTestRecording() {
+  state.recording.active = false;
+  state.recording.stoppedAt = performance.now();
+  state.recording.pendingRecordId = null;
+  updateRecordingUI();
+  addLog(`测试记录已停止，共 ${state.recording.records.length} 条`);
+}
+
+function recordTestAction(data) {
+  if (!state.recording.active) {
+    return null;
+  }
+
+  const now = performance.now();
+  const actionEndedAt = data.actionEndedAtMs ?? data.detectedAtMs ?? now;
+  const actionStartedAt = Number.isFinite(data.actionStartedAtMs) ? data.actionStartedAtMs : null;
+  const detectedAt = Number.isFinite(data.detectedAtMs) ? data.detectedAtMs : now;
+  const record = {
+    id: state.recording.nextId,
+    timestamp: new Date().toISOString(),
+    elapsedMs: elapsedMs(now),
+    type: data.type,
+    source: data.source || "",
+    label: data.label || "",
+    code: data.code || "",
+    expected: data.expected ?? recordingExpectedSelect.value,
+    received: data.received || data.code || data.label || "",
+    correct: typeof data.correct === "boolean" ? data.correct : null,
+    actionStartedAtMs: actionStartedAt === null ? null : Math.round(actionStartedAt),
+    actionEndedAtMs: Math.round(actionEndedAt),
+    detectedAtMs: Math.round(detectedAt),
+    durationMs: Number.isFinite(data.durationMs) ? Math.round(data.durationMs) : null,
+    recognitionLatencyMs:
+      Number.isFinite(detectedAt) && Number.isFinite(actionEndedAt)
+        ? Math.round(detectedAt - actionEndedAt)
+        : null,
+    totalInputToDetectionMs:
+      Number.isFinite(detectedAt) && Number.isFinite(actionStartedAt)
+        ? Math.round(detectedAt - actionStartedAt)
+        : null,
+    displayAtMs: null,
+    displayLatencyFromActionEndMs: null,
+    displayLatencyFromDetectionMs: null,
+    speechQueuedAtMs: null,
+    speechQueueLatencyFromDisplayMs: null,
+    speechStartedAtMs: null,
+    speechStartLatencyFromQueueMs: null,
+    text: "",
+    fps: Number.isFinite(state.lastFps) ? Math.round(state.lastFps) : null,
+    signals: snapshotSignals(),
+    note: data.note || "",
+  };
+
+  state.recording.nextId += 1;
+  state.recording.records.push(record);
+  state.recording.pendingRecordId = record.id;
+  updateRecordingUI();
+  return record.id;
+}
+
+function updateTestRecord(recordId, patch) {
+  if (!recordId) {
+    return;
+  }
+
+  const record = state.recording.records.find((item) => item.id === recordId);
+  if (!record) {
+    return;
+  }
+
+  Object.assign(record, patch);
+  updateRecordingUI();
+}
+
+function updatePendingTestRecord(patch) {
+  updateTestRecord(state.recording.pendingRecordId, patch);
+}
+
+function finishPendingTestRecord(patch = {}) {
+  const recordId = state.recording.pendingRecordId;
+  if (recordId) {
+    updateTestRecord(recordId, patch);
+    state.recording.pendingRecordId = null;
+  }
+}
+
+function markLastRecording(correct) {
+  const lastRecord = state.recording.records.at(-1);
+  if (!lastRecord) {
+    return;
+  }
+
+  lastRecord.correct = correct;
+  lastRecord.expected = lastRecord.expected || recordingExpectedSelect.value;
+  updateRecordingUI();
+  addLog(`上一条测试记录已标记为${correct ? "正确" : "错误"}`);
+}
+
+function recordingPayload() {
+  const startedAt = state.recording.startedAt
+    ? new Date(Date.now() - (performance.now() - state.recording.startedAt)).toISOString()
+    : null;
+
+  return {
+    exportedAt: new Date().toISOString(),
+    startedAt,
+    stoppedAt: state.recording.stoppedAt
+      ? new Date(Date.now() - (performance.now() - state.recording.stoppedAt)).toISOString()
+      : null,
+    environment: state.recording.environment || getRecordingEnvironment(),
+    summary: {
+      total: state.recording.records.length,
+      marked: state.recording.records.filter((record) => typeof record.correct === "boolean").length,
+      correct: state.recording.records.filter((record) => record.correct === true).length,
+      averageDisplayLatencyMs: averageRecorded(state.recording.records, "displayLatencyFromActionEndMs"),
+      averageSpeechQueueLatencyMs: averageRecorded(state.recording.records, "speechQueueLatencyFromDisplayMs"),
+      averageSpeechStartLatencyMs: averageRecorded(state.recording.records, "speechStartLatencyFromQueueMs"),
+    },
+    records: state.recording.records,
+  };
+}
+
+function downloadTextFile(filename, text, type) {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csvEscape(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  const text = String(value);
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function exportRecordingJson() {
+  const payload = recordingPayload();
+  downloadTextFile(
+    `als-aac-test-${new Date().toISOString().replaceAll(":", "-")}.json`,
+    JSON.stringify(payload, null, 2),
+    "application/json",
+  );
+}
+
+function exportRecordingCsv() {
+  const columns = [
+    "id",
+    "timestamp",
+    "elapsedMs",
+    "type",
+    "source",
+    "label",
+    "code",
+    "expected",
+    "received",
+    "correct",
+    "durationMs",
+    "recognitionLatencyMs",
+    "totalInputToDetectionMs",
+    "displayLatencyFromActionEndMs",
+    "displayLatencyFromDetectionMs",
+    "speechQueueLatencyFromDisplayMs",
+    "speechStartLatencyFromQueueMs",
+    "fps",
+    "ear",
+    "browUp",
+    "mouthOpen",
+    "smile",
+    "headYaw",
+    "text",
+    "note",
+  ];
+  const rows = state.recording.records.map((record) =>
+    columns.map((column) => csvEscape(record.signals?.[column] ?? record[column])).join(","),
+  );
+  downloadTextFile(
+    `als-aac-test-${new Date().toISOString().replaceAll(":", "-")}.csv`,
+    [columns.join(","), ...rows].join("\n"),
+    "text/csv;charset=utf-8",
+  );
 }
 
 function hideDiagnostic() {
@@ -372,6 +671,24 @@ function setCommunicationMessage(text, gestureLabel = "") {
   if (gestureLabel) {
     lastGesture.textContent = gestureLabel;
   }
+
+  if (state.recording.pendingRecordId) {
+    const displayAt = performance.now();
+    const record = state.recording.records.find((item) => item.id === state.recording.pendingRecordId);
+    if (record && record.displayAtMs === null) {
+      updateTestRecord(record.id, {
+        displayAtMs: Math.round(displayAt),
+        displayLatencyFromActionEndMs: Number.isFinite(record.actionEndedAtMs)
+          ? Math.round(displayAt - record.actionEndedAtMs)
+          : null,
+        displayLatencyFromDetectionMs: Number.isFinite(record.detectedAtMs)
+          ? Math.round(displayAt - record.detectedAtMs)
+          : null,
+        text,
+        label: gestureLabel || record.label,
+      });
+    }
+  }
 }
 
 function cancelSpeech() {
@@ -391,6 +708,27 @@ function speak(text = state.lastPhrase) {
   utterance.rate = 0.9;
   utterance.pitch = 1;
   utterance.volume = 1;
+  const recordId = state.recording.pendingRecordId;
+  if (recordId) {
+    const queuedAt = performance.now();
+    const record = state.recording.records.find((item) => item.id === recordId);
+    updateTestRecord(recordId, {
+      speechQueuedAtMs: Math.round(queuedAt),
+      speechQueueLatencyFromDisplayMs:
+        record && Number.isFinite(record.displayAtMs) ? Math.round(queuedAt - record.displayAtMs) : null,
+    });
+    utterance.onstart = () => {
+      const startedAt = performance.now();
+      const latestRecord = state.recording.records.find((item) => item.id === recordId);
+      updateTestRecord(recordId, {
+        speechStartedAtMs: Math.round(startedAt),
+        speechStartLatencyFromQueueMs:
+          latestRecord && Number.isFinite(latestRecord.speechQueuedAtMs)
+            ? Math.round(startedAt - latestRecord.speechQueuedAtMs)
+            : null,
+      });
+    };
+  }
   window.speechSynthesis.speak(utterance);
 }
 
@@ -400,6 +738,7 @@ function announce(text, gestureLabel, { shouldSpeak = true } = {}) {
     speak(text);
   }
   addLog(`${gestureLabel ? `${gestureLabel}：` : ""}${text}`);
+  finishPendingTestRecord({ text, label: gestureLabel });
 }
 
 let emergencyFlashTimer = null;
@@ -428,6 +767,9 @@ function clearBlinkCodeBuffer() {
   window.clearTimeout(state.blinkDecodeTimer);
   state.blinkCodeBuffer = [];
   state.blinkCodeOverflow = false;
+  state.blinkCodeStartedAt = null;
+  state.blinkCodeLastAt = null;
+  state.blinkCodeDurations = [];
   updateCodeBuffer();
 }
 
@@ -894,6 +1236,12 @@ function recordGuidedTestCode(code, { overflowed = false } = {}) {
 
   const expected = state.calibration.activeTestCode;
   const ok = !overflowed && code === expected;
+  updatePendingTestRecord({
+    expected,
+    received: overflowed ? "overflow" : code,
+    correct: ok,
+    note: "guided_test",
+  });
   state.calibration.guidedTestResults[expected] = {
     passed: ok,
     received: overflowed ? "overflow" : code,
@@ -911,6 +1259,7 @@ function recordGuidedTestCode(code, { overflowed = false } = {}) {
   } else {
     guidedTestStatus.textContent = `不匹配：期望 ${displayBlinkCode(expected)}，收到 ${overflowed ? "过长短码" : displayBlinkCode(code)}。请重新点“测试”。`;
   }
+  finishPendingTestRecord();
   updateCalibrationUI();
   return true;
 }
@@ -979,6 +1328,7 @@ function resolvePendingConfirmation(code) {
   if (code === ".") {
     setCommunicationMessage("单次短眨已忽略，请连续两次短眨确认，长闭眼取消。", pending.label);
     addLog(`${pending.label}：单次短眨已忽略`);
+    finishPendingTestRecord({ note: "single_short_blink_ignored_in_confirmation" });
     return true;
   }
 
@@ -986,22 +1336,42 @@ function resolvePendingConfirmation(code) {
     clearPendingConfirmation();
     setCommunicationMessage("已取消", `${pending.label}已取消`);
     addLog(`${pending.label}：已取消`);
+    finishPendingTestRecord({ text: "已取消", label: `${pending.label}已取消` });
     return true;
   }
 
   setCommunicationMessage("确认未识别：请连续两次短眨确认，长闭眼取消。", pending.label);
   addLog(`${pending.label}：未识别确认短码 ${code}`);
+  finishPendingTestRecord({ note: "unrecognized_confirmation_code" });
   return true;
 }
 
 function decodeBlinkCode() {
   const code = state.blinkCodeBuffer.join("");
-  const overflowed = state.blinkCodeOverflow;
-  clearBlinkCodeBuffer();
-
   if (!code) {
+    clearBlinkCodeBuffer();
     return;
   }
+
+  const overflowed = state.blinkCodeOverflow;
+  const decodedAt = performance.now();
+  const actionStartedAt = state.blinkCodeStartedAt;
+  const actionEndedAt = state.blinkCodeLastAt ?? decodedAt;
+  const durations = [...state.blinkCodeDurations];
+  recordTestAction({
+    type: "blink_code",
+    source: "blink",
+    label: `短码 ${displayBlinkCode(code)}`,
+    code,
+    received: overflowed ? "overflow" : code,
+    actionStartedAtMs: actionStartedAt,
+    actionEndedAtMs: actionEndedAt,
+    detectedAtMs: decodedAt,
+    durationMs:
+      Number.isFinite(actionStartedAt) && Number.isFinite(actionEndedAt) ? actionEndedAt - actionStartedAt : null,
+    note: durations.length ? `blinkDurations=${durations.map((duration) => Math.round(duration)).join("|")}` : "",
+  });
+  clearBlinkCodeBuffer();
 
   if (overflowed) {
     if (recordGuidedTestCode(code, { overflowed: true })) {
@@ -1009,6 +1379,7 @@ function decodeBlinkCode() {
     }
     setCommunicationMessage("短码过长，已忽略", "短码");
     addLog(`短码过长 ${code}，已忽略`);
+    finishPendingTestRecord({ note: "overflow_ignored" });
     return;
   }
 
@@ -1022,11 +1393,13 @@ function decodeBlinkCode() {
 
   if (code === ".") {
     addLog("忽略单次短眨");
+    finishPendingTestRecord({ note: "single_short_blink_ignored" });
     return;
   }
 
   if (code === "-") {
     addLog("忽略单次长闭眼（仅确认场景中用于取消）");
+    finishPendingTestRecord({ note: "single_long_blink_ignored" });
     return;
   }
 
@@ -1035,6 +1408,7 @@ function decodeBlinkCode() {
     if (!hasConfirmedCalibration()) {
       setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成并确认引导校准后才进入确认流程。`, "未确认");
       addLog(`短码 ${displayBlinkCode(code)} 已识别，因引导校准未确认而未进入确认流程`);
+      finishPendingTestRecord({ note: "calibration_not_confirmed" });
       return;
     }
 
@@ -1047,6 +1421,7 @@ function decodeBlinkCode() {
     if (!hasConfirmedCalibration()) {
       setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成并确认引导校准后才播报短语。`, "未确认");
       addLog(`短码 ${displayBlinkCode(code)} 已识别，因引导校准未确认而未播报`);
+      finishPendingTestRecord({ note: "calibration_not_confirmed" });
       return;
     }
 
@@ -1066,13 +1441,22 @@ function decodeBlinkCode() {
 
   setCommunicationMessage(`未识别编码：${displayBlinkCode(code)}`, "短码");
   addLog(`未识别短码 ${code}`);
+  finishPendingTestRecord({ note: "unrecognized_code" });
 }
 
-function enqueueBlinkSymbol(symbol) {
+function enqueueBlinkSymbol(symbol, meta = {}) {
   if (!blinkCodeToggle.checked || isRecognitionPaused(performance.now())) {
     return;
   }
 
+  if (state.blinkCodeBuffer.length === 0) {
+    state.blinkCodeStartedAt = meta.actionStartedAtMs ?? meta.actionEndedAtMs ?? performance.now();
+    state.blinkCodeDurations = [];
+  }
+  state.blinkCodeLastAt = meta.actionEndedAtMs ?? performance.now();
+  if (Number.isFinite(meta.durationMs)) {
+    state.blinkCodeDurations.push(meta.durationMs);
+  }
   state.blinkCodeBuffer.push(symbol);
   if (state.blinkCodeBuffer.length > 3) {
     state.blinkCodeOverflow = true;
@@ -1238,15 +1622,30 @@ function handleGestureEvent(event, label) {
     return;
   }
 
+  const detectedAt = performance.now();
+  recordTestAction({
+    type: "gesture",
+    source: event.name,
+    label,
+    received: event.name,
+    actionStartedAtMs: detectedAt - event.duration,
+    actionEndedAtMs: detectedAt,
+    detectedAtMs: detectedAt,
+    durationMs: event.duration,
+    note: `peak=${(event.value || 0).toFixed(3)}`,
+  });
+
   if (state.calibration.activeTestCode) {
     setCommunicationMessage(`短码测试中，${label}动作已记录但不执行。`, `${label}测试保护`);
     addLog(`${label}动作：短码测试中未执行`);
+    finishPendingTestRecord({ note: "ignored_during_blink_test" });
     return;
   }
 
   if (!hasConfirmedCalibration()) {
     setCommunicationMessage(`检测到${label}；完成并确认引导校准后才启用动作映射。`, `${label}候选`);
     addLog(`${label}候选：${Math.round(event.duration)}ms，峰值 ${(event.value || 0).toFixed(2)}，校准未确认未播报`);
+    finishPendingTestRecord({ note: "calibration_not_confirmed" });
     return;
   }
 
@@ -1268,6 +1667,7 @@ function handleGestureEvent(event, label) {
     if (state.gestureSequences.mouthOpenTimes.length < 2) {
       setCommunicationMessage("张嘴一次已记录，请在 4 秒内再次张嘴触发吸痰提示。", message);
       addLog(`${label} 1/2：${Math.round(event.duration)}ms，等待第二次张嘴`);
+      finishPendingTestRecord({ note: "mouth_open_1_of_2" });
       return;
     }
 
@@ -1832,11 +2232,13 @@ function updateFps() {
   }
 
   const average = state.fpsSamples.reduce((sum, fps) => sum + fps, 0) / state.fpsSamples.length;
+  state.lastFps = average;
   fpsValue.textContent = Math.round(average).toString();
 }
 
 function processFaceSignals(signals, now) {
   const detectionSignals = updateSignalBaseline(signals);
+  state.lastSignals = { ...signals, ...detectionSignals };
   updateGestureMeters(detectionSignals);
 
   if (isRecognitionPaused(now)) {
@@ -1932,7 +2334,8 @@ function processFaceSignals(signals, now) {
 }
 
 function handleBlinkReleased(now, ear) {
-  const duration = state.blinkClosedAt ? now - state.blinkClosedAt : 0;
+  const blinkStartedAt = state.blinkClosedAt;
+  const duration = blinkStartedAt ? now - blinkStartedAt : 0;
   state.blinkWasClosed = false;
   state.blinkClosedAt = null;
 
@@ -1943,14 +2346,22 @@ function handleBlinkReleased(now, ear) {
 
   if (duration >= BLINK_SYMBOLS.longMinMs && duration <= BLINK_SYMBOLS.longMaxMs) {
     recordCalibrationBlink("-", duration);
-    enqueueBlinkSymbol("-");
+    enqueueBlinkSymbol("-", {
+      actionStartedAtMs: blinkStartedAt,
+      actionEndedAtMs: now,
+      durationMs: duration,
+    });
     addLog(`长闭眼 ${Math.round(duration)}ms（EAR ${ear.toFixed(3)}）`);
     return;
   }
 
   if (duration >= BLINK_SYMBOLS.shortMinMs && duration <= BLINK_SYMBOLS.shortMaxMs) {
     recordCalibrationBlink(".", duration);
-    enqueueBlinkSymbol(".");
+    enqueueBlinkSymbol(".", {
+      actionStartedAtMs: blinkStartedAt,
+      actionEndedAtMs: now,
+      durationMs: duration,
+    });
     addLog(`短眨眼 ${Math.round(duration)}ms（EAR ${ear.toFixed(3)}）`);
     return;
   }
@@ -2097,6 +2508,22 @@ calibrationResetButton.addEventListener("click", resetCalibration);
 
 guidedTestButton.addEventListener("click", startGuidedTest);
 
+recordingStartButton.addEventListener("click", startTestRecording);
+
+recordingStopButton.addEventListener("click", stopTestRecording);
+
+recordingMarkCorrectButton.addEventListener("click", () => {
+  markLastRecording(true);
+});
+
+recordingMarkWrongButton.addEventListener("click", () => {
+  markLastRecording(false);
+});
+
+recordingExportJsonButton.addEventListener("click", exportRecordingJson);
+
+recordingExportCsvButton.addEventListener("click", exportRecordingCsv);
+
 pauseRecognitionButton.addEventListener("click", () => {
   if (state.pausedUntil > performance.now()) {
     resumeRecognition();
@@ -2142,6 +2569,7 @@ refreshCameraList().catch(() => {
 
 applyMobileRuntimeHints();
 registerPwaServiceWorker();
+updateRecordingUI();
 
 if (!loadSavedCalibrationProfile()) {
   updateCalibrationUI();

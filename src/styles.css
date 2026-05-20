@@ -914,6 +914,70 @@ input[type="range"] {
   font-weight: 700;
 }
 
+/* ── Test Recording Panel ───────────────────────────────── */
+.recording-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  background: var(--bg-card);
+}
+
+.recording-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.recording-header span:last-child {
+  color: var(--accent);
+}
+
+.recording-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.recording-metrics span {
+  display: grid;
+  min-height: 48px;
+  align-content: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 9px;
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.recording-metrics strong {
+  color: var(--accent-hot);
+  font-size: 0.95rem;
+}
+
+.recording-expected {
+  display: grid;
+  gap: 8px;
+}
+
+.recording-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.recording-actions .compact-action {
+  min-height: 36px;
+}
+
 /* ── Diagnostic Panel ──────────────────────────────────── */
 .diagnostic-panel {
   display: grid;
@@ -1147,6 +1211,15 @@ input[type="range"] {
   .calibration-results span {
     min-height: 32px;
   }
+
+  .recording-panel {
+    padding: 12px;
+  }
+
+  .recording-metrics,
+  .recording-actions {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 390px) {
@@ -1342,6 +1415,20 @@ input[type="range"] {
   .event-log {
     min-height: 86px;
     max-height: 120px;
+  }
+
+  .recording-panel {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .recording-metrics,
+  .recording-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .recording-metrics span {
+    min-height: 42px;
   }
 }
 
@@ -1567,5 +1654,19 @@ input[type="range"] {
   .event-log {
     min-height: 78px;
     max-height: 120px;
+  }
+
+  .recording-panel {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .recording-metrics,
+  .recording-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .recording-metrics span {
+    min-height: 40px;
   }
 }
