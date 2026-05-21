@@ -223,6 +223,8 @@ canvas {
   inset: 0;
   width: 100%;
   height: 100%;
+  object-fit: contain;
+  object-position: center center;
 }
 
 /* 紧急求助红色闪烁覆盖层 */
@@ -247,7 +249,6 @@ canvas {
 }
 
 video {
-  object-fit: cover;
   transform: scaleX(-1);
 }
 

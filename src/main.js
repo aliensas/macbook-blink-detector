@@ -124,6 +124,7 @@ const INNER_LIP = [
 ];
 const FACE_CENTER_LINE = [10, 9, 8, 168, 6, 197, 195, 5, 4, 1, 2, 164, 0, 17, 18, 200, 199, 175, 152];
 const MOUTH_OPEN_POINTS = [13, 14];
+const MOUTH_WIDTH_POINTS = [61, 291];
 const HEAD_YAW_POINTS = [1, 33, 263];
 
 const BLINK_SYMBOLS = {
@@ -218,7 +219,7 @@ const DEFAULT_ACTION_CONFIG = [
     label: "抬眉",
     displayText: "是 / 确认",
     speechText: "是，确认",
-    instruction: "抬眉保持约 0.5 秒；校准确认后可直接表达是/确认。",
+    instruction: "头部尽量稳定，轻抬眉约 0.25 秒后放松；上下点头会暂停抬眉判断。",
     category: "control",
     input: "brow",
     enabled: true,
@@ -232,7 +233,7 @@ const DEFAULT_ACTION_CONFIG = [
     label: "张嘴2次",
     displayText: "我需要吸痰，请马上查看",
     speechText: "我需要吸痰，请马上查看",
-    instruction: "张嘴保持约 0.8 秒并闭合，4 秒内重复两次。",
+    instruction: "微张嘴约 0.2 秒后闭合，6 秒内重复两次。",
     category: "care",
     input: "mouth",
     enabled: true,
@@ -246,7 +247,7 @@ const DEFAULT_ACTION_CONFIG = [
     label: "微笑",
     displayText: "谢谢，可以，我还好",
     speechText: "谢谢，可以，我还好",
-    instruction: "微笑保持约 0.5 秒；单次用于情绪/状态表达。",
+    instruction: "轻微闭嘴微笑约 0.25 秒后放松；只有明显张嘴时才会抑制微笑。",
     category: "emotion",
     input: "smile",
     enabled: true,
@@ -258,9 +259,9 @@ const DEFAULT_ACTION_CONFIG = [
     id: "smile_double_love",
     gestureId: "smile_double",
     label: "微笑2次",
-    displayText: "我爱你们",
-    speechText: "我爱你们",
-    instruction: "连续微笑两次；第二次微笑触发表达。",
+    displayText: "我爱你",
+    speechText: "我爱你",
+    instruction: "先闭嘴微笑并完全放松约 0.5 秒，再第二次闭嘴微笑。",
     category: "emotion",
     input: "smile",
     enabled: true,
@@ -274,7 +275,7 @@ const DEFAULT_ACTION_CONFIG = [
     label: "摇头",
     displayText: "否，不是，取消",
     speechText: "否，不是，取消",
-    instruction: "轻微左-右-左或右-左-右摇头；不需要大幅度。",
+    instruction: "极轻微左-右-左或右-左-右摇头；4 秒内完成，不需要大幅度。",
     category: "control",
     input: "head",
     enabled: true,
@@ -301,8 +302,25 @@ const EVENT_GESTURE_IDS = {
   HEAD_SHAKE: "head_shake",
 };
 const CONFIRMATION_TIMEOUT_MS = 10 * 1000;
-const MOUTH_DOUBLE_WINDOW_MS = 4000;
-const SMILE_DOUBLE_WINDOW_MS = 1800;
+const MOUTH_DOUBLE_WINDOW_MS = 6000;
+const MOUTH_BROW_SUPPRESS_THRESHOLD = 0.045;
+const MOUTH_SMILE_SUPPRESS_THRESHOLD = 0.16;
+const SMILE_MOUTH_SUPPRESS_THRESHOLD = 0.14;
+const SMILE_DOUBLE_WINDOW_MS = 2400;
+const SMILE_DOUBLE_MIN_GAP_MS = 550;
+const SMILE_WIDTH_DELTA_SCALE = 0.055;
+const HEAD_SHAKE_YAW_THRESHOLD = 0.022;
+const BROW_HEAD_MOTION_GUARD = {
+  pitchDelta: 0.03,
+  pitchJump: 0.012,
+  centerJump: 0.015,
+  settleMs: 650,
+};
+const FACE_SCALE_STABILITY = {
+  relativeJump: 0.1,
+  absoluteJump: 0.02,
+  settleMs: 700,
+};
 const CALIBRATION_STORAGE_KEY = "alsFacialAac.defaultPatientCalibration.v1";
 const CALIBRATION_STEPS = [
   {
@@ -386,7 +404,18 @@ const state = {
     ready: false,
     browUp: 0,
     mouthOpen: 0,
-    smile: 0,
+    smileBlendshape: 0,
+    mouthWidthRatio: 0,
+    headPitch: 0,
+  },
+  faceStability: {
+    lastScale: null,
+    unstableUntil: 0,
+  },
+  headMotionGuard: {
+    lastPitch: null,
+    lastCenterY: null,
+    browBlockedUntil: 0,
   },
   gestureSequences: {
     mouthOpenTimes: [],
@@ -466,7 +495,12 @@ function snapshotSignals() {
     browUp: Number.isFinite(signals.browUp) ? Number(signals.browUp.toFixed(4)) : null,
     mouthOpen: Number.isFinite(signals.mouthOpen) ? Number(signals.mouthOpen.toFixed(4)) : null,
     smile: Number.isFinite(signals.smile) ? Number(signals.smile.toFixed(4)) : null,
+    smileBlendshape: Number.isFinite(signals.smileBlendshape) ? Number(signals.smileBlendshape.toFixed(4)) : null,
+    mouthWidthRatio: Number.isFinite(signals.mouthWidthRatio) ? Number(signals.mouthWidthRatio.toFixed(4)) : null,
+    smileWidthDelta: Number.isFinite(signals.smileWidthDelta) ? Number(signals.smileWidthDelta.toFixed(4)) : null,
     headYaw: Number.isFinite(signals.headYaw) ? Number(signals.headYaw.toFixed(4)) : null,
+    headPitch: Number.isFinite(signals.headPitch) ? Number(signals.headPitch.toFixed(4)) : null,
+    headPitchDelta: Number.isFinite(signals.headPitchDelta) ? Number(signals.headPitchDelta.toFixed(4)) : null,
     hasFace: Boolean(signals.hasFace),
   };
 }
@@ -715,7 +749,12 @@ function exportRecordingCsv() {
     "browUp",
     "mouthOpen",
     "smile",
+    "smileBlendshape",
+    "mouthWidthRatio",
+    "smileWidthDelta",
     "headYaw",
+    "headPitch",
+    "headPitchDelta",
     "text",
     "note",
   ];
@@ -747,23 +786,6 @@ function setControlsBusy(isBusy) {
   stopButton.disabled = isBusy || !state.running;
 }
 
-// Temporary cleanup for old PWA builds; the current app no longer registers a service worker.
-function clearLegacyOfflineCache() {
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.getRegistrations().then((registrations) => {
-      registrations
-        .filter((registration) => registration.scope.startsWith(window.location.origin))
-        .forEach((registration) => registration.unregister());
-    });
-  }
-
-  if ("caches" in window) {
-    caches.keys().then((keys) => {
-      keys.filter((key) => key.startsWith("als-facial-aac-")).forEach((key) => caches.delete(key));
-    });
-  }
-}
-
 function resetDetectionWindow() {
   state.closedFrames = 0;
   state.openFrames = 0;
@@ -786,7 +808,14 @@ function resetSignalBaseline() {
   state.signalBaseline.ready = false;
   state.signalBaseline.browUp = 0;
   state.signalBaseline.mouthOpen = 0;
-  state.signalBaseline.smile = 0;
+  state.signalBaseline.smileBlendshape = 0;
+  state.signalBaseline.mouthWidthRatio = 0;
+  state.signalBaseline.headPitch = 0;
+  state.faceStability.lastScale = null;
+  state.faceStability.unstableUntil = 0;
+  state.headMotionGuard.lastPitch = null;
+  state.headMotionGuard.lastCenterY = null;
+  state.headMotionGuard.browBlockedUntil = 0;
 }
 
 function resetGestureSequences() {
@@ -1899,9 +1928,18 @@ function isRecognitionPaused(now = performance.now()) {
   return true;
 }
 
-function createHoldDetector({ name, threshold, minHoldMs, cooldownMs, onTrigger }) {
+function createHoldDetector({
+  name,
+  threshold,
+  peakThreshold = threshold,
+  minHoldMs,
+  cooldownMs,
+  releaseMinMs = 0,
+  onTrigger,
+}) {
   let active = false;
   let startedAt = 0;
+  let releaseStartedAt = 0;
   let peakValue = 0;
   let lastTriggerAt = 0;
 
@@ -1909,6 +1947,7 @@ function createHoldDetector({ name, threshold, minHoldMs, cooldownMs, onTrigger 
     reset() {
       active = false;
       startedAt = 0;
+      releaseStartedAt = 0;
       peakValue = 0;
     },
     update(value, now, enabled) {
@@ -1918,6 +1957,7 @@ function createHoldDetector({ name, threshold, minHoldMs, cooldownMs, onTrigger 
       }
 
       if (value >= threshold) {
+        releaseStartedAt = 0;
         if (!active) {
           active = true;
           startedAt = now;
@@ -1932,10 +1972,19 @@ function createHoldDetector({ name, threshold, minHoldMs, cooldownMs, onTrigger 
         return;
       }
 
-      const duration = now - startedAt;
-      active = false;
+      if (!releaseStartedAt) {
+        releaseStartedAt = now;
+      }
 
-      if (duration >= minHoldMs && now - lastTriggerAt >= cooldownMs) {
+      if (now - releaseStartedAt < releaseMinMs) {
+        return;
+      }
+
+      const duration = releaseStartedAt - startedAt;
+      active = false;
+      releaseStartedAt = 0;
+
+      if (duration >= minHoldMs && peakValue >= peakThreshold && now - lastTriggerAt >= cooldownMs) {
         lastTriggerAt = now;
         onTrigger({ name, duration, value: peakValue });
       }
@@ -1946,23 +1995,29 @@ function createHoldDetector({ name, threshold, minHoldMs, cooldownMs, onTrigger 
 const gestureDetectors = {
   brow: createHoldDetector({
     name: "BROW_RAISE",
-    threshold: 0.2,
-    minHoldMs: 500,
-    cooldownMs: 1800,
+    threshold: 0.1,
+    peakThreshold: 0.14,
+    minHoldMs: 250,
+    cooldownMs: 1300,
+    releaseMinMs: 90,
     onTrigger: (event) => handleGestureEvent(event, "抬眉"),
   }),
   mouth: createHoldDetector({
     name: "MOUTH_OPEN",
-    threshold: 0.32,
-    minHoldMs: 800,
-    cooldownMs: 700,
+    threshold: 0.055,
+    peakThreshold: 0.075,
+    minHoldMs: 180,
+    cooldownMs: 300,
+    releaseMinMs: 50,
     onTrigger: (event) => handleGestureEvent(event, "张嘴"),
   }),
   smile: createHoldDetector({
     name: "SMILE",
-    threshold: 0.28,
-    minHoldMs: 500,
-    cooldownMs: 2500,
+    threshold: 0.09,
+    peakThreshold: 0.12,
+    minHoldMs: 250,
+    cooldownMs: 450,
+    releaseMinMs: 120,
     onTrigger: (event) => handleGestureEvent(event, "微笑"),
   }),
 };
@@ -1983,9 +2038,9 @@ const headShakeDetector = {
       return;
     }
 
-    const direction = yaw > 0.09 ? "right" : yaw < -0.09 ? "left" : "";
+    const direction = yaw > HEAD_SHAKE_YAW_THRESHOLD ? "right" : yaw < -HEAD_SHAKE_YAW_THRESHOLD ? "left" : "";
     if (!direction) {
-      if (this.windowStartedAt && now - this.windowStartedAt > 1700) {
+      if (this.windowStartedAt && now - this.windowStartedAt > 3200) {
         this.reset();
       }
       return;
@@ -2002,7 +2057,7 @@ const headShakeDetector = {
       this.changeCount += 1;
     }
 
-    if (this.changeCount >= 2 && now - this.windowStartedAt <= 2200 && now - this.lastTriggerAt >= 1800) {
+    if (this.changeCount >= 2 && now - this.windowStartedAt <= 4000 && now - this.lastTriggerAt >= 1000) {
       const duration = now - this.windowStartedAt;
       const peakValue = Math.abs(yaw);
       this.lastTriggerAt = now;
@@ -2010,7 +2065,7 @@ const headShakeDetector = {
       handleGestureEvent({ name: "HEAD_SHAKE", duration, value: peakValue }, "摇头");
     }
 
-    if (this.windowStartedAt && now - this.windowStartedAt > 2200) {
+    if (this.windowStartedAt && now - this.windowStartedAt > 4000) {
       this.reset();
     }
   },
@@ -2049,10 +2104,19 @@ function handleSmileGesture(event, label) {
   }
 
   if (state.gestureSequences.smileTimer) {
+    const pending = state.gestureSequences.smilePending;
+    const detectedAt = performance.now();
+    const gap = pending ? detectedAt - pending.detectedAt : 0;
+
+    if (gap < SMILE_DOUBLE_MIN_GAP_MS) {
+      addLog(`微笑间隔 ${Math.round(gap)}ms 过短，按同一次微笑观察`);
+      return;
+    }
+
     window.clearTimeout(state.gestureSequences.smileTimer);
     state.gestureSequences.smileTimer = 0;
     state.gestureSequences.smilePending = null;
-    recordGestureAction(event, doubleSmileAction.label, EVENT_GESTURE_IDS.SMILE_DOUBLE);
+    recordGestureAction(event, doubleSmileAction.label, EVENT_GESTURE_IDS.SMILE_DOUBLE, detectedAt);
     executeConfiguredAction(doubleSmileAction, doubleSmileAction.label);
     return;
   }
@@ -2062,8 +2126,8 @@ function handleSmileGesture(event, label) {
     label,
     detectedAt: performance.now(),
   };
-  setCommunicationMessage("微笑一次已记录；再次微笑会表达“我爱你们”。", "微笑 1/2");
-  addLog("微笑 1/2：等待第二次微笑");
+  setCommunicationMessage("微笑一次已记录；完全放松约半秒后再次微笑会表达“我爱你”。", "微笑 1/2");
+  addLog("微笑 1/2：等待第二次明确微笑");
   state.gestureSequences.smileTimer = window.setTimeout(() => {
     const pending = state.gestureSequences.smilePending;
     state.gestureSequences.smileTimer = 0;
@@ -2119,7 +2183,7 @@ function handleGestureEvent(event, label) {
     state.gestureSequences.mouthOpenTimes.push(now);
 
     if (state.gestureSequences.mouthOpenTimes.length < 2) {
-      setCommunicationMessage("张嘴一次已记录，请在 4 秒内再次张嘴触发吸痰提示。", "张嘴 1/2");
+      setCommunicationMessage("张嘴一次已记录，请在 6 秒内再次微张嘴触发吸痰提示。", "张嘴 1/2");
       addLog(`${label} 1/2：${Math.round(event.duration)}ms，等待第二次张嘴`);
       finishPendingTestRecord({ note: "mouth_open_1_of_2" });
       return;
@@ -2213,6 +2277,32 @@ function estimateHeadYaw(landmarks) {
   return Math.max(-1, Math.min(1, (nose.x - eyeCenterX) / eyeWidth));
 }
 
+function estimateHeadPitch(landmarks) {
+  if (!hasLandmarkIndices(landmarks, HEAD_YAW_POINTS)) {
+    return 0;
+  }
+
+  const nose = landmarks[1];
+  const leftEyeOuter = landmarks[33];
+  const rightEyeOuter = landmarks[263];
+  const eyeCenterY = (leftEyeOuter.y + rightEyeOuter.y) / 2;
+  const eyeWidth = Math.abs(rightEyeOuter.x - leftEyeOuter.x);
+
+  if (eyeWidth === 0) {
+    return 0;
+  }
+
+  return (nose.y - eyeCenterY) / eyeWidth;
+}
+
+function estimateFaceCenterY(landmarks) {
+  if (!hasLandmarkIndices(landmarks, [10, 152])) {
+    return null;
+  }
+
+  return (landmarks[10].y + landmarks[152].y) / 2;
+}
+
 function faceReferenceWidth(landmarks) {
   if (!hasLandmarkIndices(landmarks, [33, 263])) {
     return 0;
@@ -2229,15 +2319,26 @@ function extractFaceSignals(result, landmarks) {
       browUp: 0,
       mouthOpen: 0,
       smile: 0,
+      smileBlendshape: 0,
+      mouthWidthRatio: 0,
       headYaw: 0,
+      headPitch: 0,
+      faceScale: null,
+      faceCenterY: null,
     };
   }
 
   const mouthDistance = normalizedLandmarkDistance(landmarks, MOUTH_OPEN_POINTS) ?? 0;
+  const mouthWidthDistance = normalizedLandmarkDistance(landmarks, MOUTH_WIDTH_POINTS) ?? 0;
   const referenceWidth = faceReferenceWidth(landmarks);
   const mouthOpenRatio = referenceWidth > 0 ? mouthDistance / referenceWidth : 0;
-  const mouthOpenFallback = Math.min(Math.max((mouthOpenRatio - 0.04) / 0.22, 0), 1);
+  const mouthWidthRatio = referenceWidth > 0 ? mouthWidthDistance / referenceWidth : 0;
+  const mouthOpenFallback = Math.min(Math.max((mouthOpenRatio - 0.018) / 0.13, 0), 1);
   const mouthOpen = Math.max(getBlendshapeScore(result, "jawOpen"), mouthOpenFallback);
+  const smileBlendshape = Math.max(
+    getBlendshapeScore(result, "mouthSmileLeft"),
+    getBlendshapeScore(result, "mouthSmileRight"),
+  );
 
   return {
     hasFace: true,
@@ -2248,8 +2349,13 @@ function extractFaceSignals(result, landmarks) {
       getBlendshapeScore(result, "browOuterUpRight"),
     ),
     mouthOpen,
-    smile: Math.max(getBlendshapeScore(result, "mouthSmileLeft"), getBlendshapeScore(result, "mouthSmileRight")),
+    smile: smileBlendshape,
+    smileBlendshape,
+    mouthWidthRatio,
     headYaw: estimateHeadYaw(landmarks),
+    headPitch: estimateHeadPitch(landmarks),
+    faceScale: referenceWidth,
+    faceCenterY: estimateFaceCenterY(landmarks),
   };
 }
 
@@ -2260,22 +2366,36 @@ function updateSignalBaseline(signals) {
   }
 
   const baseline = state.signalBaseline;
+  const smileBlendshape = Number.isFinite(signals.smileBlendshape) ? signals.smileBlendshape : signals.smile;
+  const mouthWidthRatio = Number.isFinite(signals.mouthWidthRatio) ? signals.mouthWidthRatio : 0;
+
   if (!baseline.ready) {
     baseline.ready = true;
     baseline.browUp = signals.browUp;
     baseline.mouthOpen = signals.mouthOpen;
-    baseline.smile = signals.smile;
+    baseline.smileBlendshape = smileBlendshape;
+    baseline.mouthWidthRatio = mouthWidthRatio;
+    baseline.headPitch = signals.headPitch;
   } else {
     baseline.browUp += (signals.browUp - baseline.browUp) * 0.015;
     baseline.mouthOpen += (signals.mouthOpen - baseline.mouthOpen) * 0.01;
-    baseline.smile += (signals.smile - baseline.smile) * 0.01;
+    baseline.smileBlendshape += (smileBlendshape - baseline.smileBlendshape) * 0.01;
+    baseline.mouthWidthRatio += (mouthWidthRatio - baseline.mouthWidthRatio) * 0.01;
+    baseline.headPitch += (signals.headPitch - baseline.headPitch) * 0.015;
   }
+
+  const smileBlendshapeDelta = Math.max(0, smileBlendshape - baseline.smileBlendshape);
+  const smileWidthDelta = Math.max(0, mouthWidthRatio - baseline.mouthWidthRatio);
+  const smileFromWidth = Math.min(smileWidthDelta / SMILE_WIDTH_DELTA_SCALE, 1);
 
   return {
     ...signals,
     browUp: Math.max(0, signals.browUp - baseline.browUp),
     mouthOpen: Math.max(0, signals.mouthOpen - baseline.mouthOpen),
-    smile: Math.max(0, signals.smile - baseline.smile),
+    smile: Math.max(smileBlendshapeDelta, smileFromWidth),
+    smileBlendshapeDelta,
+    smileWidthDelta,
+    headPitchDelta: signals.headPitch - baseline.headPitch,
   };
 }
 
@@ -2289,6 +2409,62 @@ function updateGestureMeters(signals) {
   mouthValue.textContent = (signals.mouthOpen || 0).toFixed(2);
   smileValue.textContent = (signals.smile || 0).toFixed(2);
   headValue.textContent = Math.abs(signals.headYaw || 0).toFixed(2);
+}
+
+function isFaceScaleUnstable(signals, now) {
+  const scale = signals.faceScale;
+  if (!signals.hasFace || !Number.isFinite(scale) || scale <= 0) {
+    state.faceStability.lastScale = null;
+    state.faceStability.unstableUntil = 0;
+    return false;
+  }
+
+  const previousScale = state.faceStability.lastScale;
+  state.faceStability.lastScale = scale;
+
+  if (Number.isFinite(previousScale) && previousScale > 0) {
+    const absoluteJump = Math.abs(scale - previousScale);
+    const relativeJump = absoluteJump / previousScale;
+    if (
+      absoluteJump >= FACE_SCALE_STABILITY.absoluteJump &&
+      relativeJump >= FACE_SCALE_STABILITY.relativeJump
+    ) {
+      state.faceStability.unstableUntil = now + FACE_SCALE_STABILITY.settleMs;
+    }
+  }
+
+  return now < state.faceStability.unstableUntil;
+}
+
+function isHeadMotionSuppressingBrow(signals, detectionSignals, now) {
+  const pitch = signals.headPitch;
+  const centerY = signals.faceCenterY;
+  const guard = state.headMotionGuard;
+
+  if (!signals.hasFace || !Number.isFinite(pitch)) {
+    guard.lastPitch = null;
+    guard.lastCenterY = null;
+    guard.browBlockedUntil = 0;
+    return false;
+  }
+
+  const pitchDelta = Math.abs(detectionSignals.headPitchDelta || 0);
+  const pitchJump = Number.isFinite(guard.lastPitch) ? Math.abs(pitch - guard.lastPitch) : 0;
+  const centerJump =
+    Number.isFinite(guard.lastCenterY) && Number.isFinite(centerY) ? Math.abs(centerY - guard.lastCenterY) : 0;
+
+  guard.lastPitch = pitch;
+  guard.lastCenterY = Number.isFinite(centerY) ? centerY : null;
+
+  if (
+    pitchDelta >= BROW_HEAD_MOTION_GUARD.pitchDelta ||
+    pitchJump >= BROW_HEAD_MOTION_GUARD.pitchJump ||
+    centerJump >= BROW_HEAD_MOTION_GUARD.centerJump
+  ) {
+    guard.browBlockedUntil = now + BROW_HEAD_MOTION_GUARD.settleMs;
+  }
+
+  return now < guard.browBlockedUntil;
 }
 
 function chooseBuiltInCamera(devices) {
@@ -2779,9 +2955,38 @@ function processFaceSignals(signals, now) {
     state.blinkClosedAt = null;
   }
 
-  gestureDetectors.brow.update(detectionSignals.browUp, now, browToggle.checked);
-  gestureDetectors.mouth.update(detectionSignals.mouthOpen, now, mouthToggle.checked);
-  gestureDetectors.smile.update(detectionSignals.smile, now, smileToggle.checked);
+  if (isFaceScaleUnstable(signals, now)) {
+    lastGesture.textContent = "画面稳定中";
+    resetGestureSequences();
+    gestureDetectors.brow.reset();
+    gestureDetectors.mouth.reset();
+    gestureDetectors.smile.reset();
+    headShakeDetector.reset();
+    return;
+  }
+
+  const mouthLooksActive = detectionSignals.mouthOpen >= MOUTH_SMILE_SUPPRESS_THRESHOLD;
+  const smileLooksActive = smileToggle.checked && detectionSignals.smile >= SMILE_MOUTH_SUPPRESS_THRESHOLD;
+  const headMotionSuppressesBrow = isHeadMotionSuppressingBrow(signals, detectionSignals, now);
+
+  gestureDetectors.mouth.update(
+    smileLooksActive && !mouthLooksActive ? 0 : detectionSignals.mouthOpen,
+    now,
+    mouthToggle.checked,
+  );
+
+  if (headMotionSuppressesBrow) {
+    if (browToggle.checked) {
+      lastGesture.textContent = "点头中，抬眉暂停";
+    }
+    gestureDetectors.brow.reset();
+  } else if (detectionSignals.mouthOpen >= MOUTH_BROW_SUPPRESS_THRESHOLD) {
+    gestureDetectors.brow.reset();
+  } else {
+    gestureDetectors.brow.update(detectionSignals.browUp, now, browToggle.checked);
+  }
+
+  gestureDetectors.smile.update(mouthLooksActive ? 0 : detectionSignals.smile, now, smileToggle.checked);
   headShakeDetector.update(detectionSignals.headYaw, now, headShakeToggle.checked);
 }
 
@@ -3019,8 +3224,6 @@ navigator.mediaDevices?.addEventListener?.("devicechange", () => {
 });
 
 window.addEventListener("resize", resizeCanvas);
-
-clearLegacyOfflineCache();
 
 refreshCameraList().catch(() => {
   const option = document.createElement("option");
