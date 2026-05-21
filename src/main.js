@@ -235,7 +235,7 @@ const DEFAULT_ACTION_CONFIG = [
     id: "brow_raise_yes",
     gestureId: "brow_raise",
     label: "抬眉",
-    displayText: "是 / 确认",
+    displayText: "是，确认",
     speechText: "是，确认",
     instruction: "头部尽量稳定，轻抬眉约 0.25 秒后放松；上下点头会暂停抬眉判断。",
     category: "control",
@@ -335,8 +335,8 @@ const FACE_SCALE_STABILITY = {
   settleMs: 700,
 };
 const CALIBRATION_STORAGE_KEY = "alsFacialAac.defaultPatientCalibration.v1";
-const ACTION_CONFIG_STORAGE_KEY = "alsFacialAac.actionConfig.v2";
-const ACTION_TEXT_FIELDS = ["displayText", "speechText"];
+const ACTION_TEXT_STORAGE_KEY = "alsFacialAac.actionText.v1";
+const LEGACY_ACTION_CONFIG_STORAGE_KEYS = ["alsFacialAac.actionConfig.v2"];
 const CALIBRATION_STEPS = [
   {
     id: "position",
@@ -872,6 +872,16 @@ function normalizeActionText(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function getActionText(action) {
+  return normalizeActionText(action?.displayText || action?.speechText || "");
+}
+
+function setActionText(action, text) {
+  const normalized = normalizeActionText(text);
+  action.displayText = normalized;
+  action.speechText = normalized;
+}
+
 function resetActionConfigTextFromDefaults() {
   ACTION_CONFIG.forEach((action) => {
     const defaults = getDefaultActionConfigById(action.id);
@@ -879,8 +889,7 @@ function resetActionConfigTextFromDefaults() {
       return;
     }
 
-    action.displayText = defaults.displayText;
-    action.speechText = defaults.speechText;
+    setActionText(action, getActionText(defaults));
   });
 }
 
@@ -894,21 +903,16 @@ function extractActionTextOverrides(payload) {
     Object.entries(source)
       .map(([id, values]) => {
         const defaults = getDefaultActionConfigById(id);
-        if (!defaults || !values || typeof values !== "object" || Array.isArray(values)) {
+        if (!defaults) {
           return null;
         }
 
-        const override = {};
-        ACTION_TEXT_FIELDS.forEach((field) => {
-          if (field in values) {
-            const text = normalizeActionText(values[field]);
-            if (text) {
-              override[field] = text;
-            }
-          }
-        });
+        const text =
+          typeof values === "string"
+            ? normalizeActionText(values)
+            : normalizeActionText(values?.text || values?.speechText || values?.displayText);
 
-        return Object.keys(override).length > 0 ? [id, override] : null;
+        return text ? [id, text] : null;
       })
       .filter(Boolean),
   );
@@ -918,17 +922,13 @@ function applyActionTextOverrides(payload) {
   const overrides = extractActionTextOverrides(payload);
   resetActionConfigTextFromDefaults();
 
-  Object.entries(overrides).forEach(([id, values]) => {
+  Object.entries(overrides).forEach(([id, text]) => {
     const action = getActionConfigById(id);
     if (!action) {
       return;
     }
 
-    ACTION_TEXT_FIELDS.forEach((field) => {
-      if (values[field]) {
-        action[field] = values[field];
-      }
-    });
+    setActionText(action, text);
   });
 }
 
@@ -940,21 +940,16 @@ function currentActionTextOverrides() {
         return null;
       }
 
-      const override = {};
-      ACTION_TEXT_FIELDS.forEach((field) => {
-        const text = normalizeActionText(action[field]);
-        if (text && text !== defaults[field]) {
-          override[field] = text;
-        }
-      });
+      const text = getActionText(action);
+      const defaultText = getActionText(defaults);
 
-      return Object.keys(override).length > 0 ? [action.id, override] : null;
+      return text && text !== defaultText ? [action.id, text] : null;
     }).filter(Boolean),
   );
 }
 
 function findInvalidActionText() {
-  return ACTION_CONFIG.find((action) => ACTION_TEXT_FIELDS.some((field) => !normalizeActionText(action[field])));
+  return ACTION_CONFIG.find((action) => !getActionText(action));
 }
 
 function setActionSettingsStatus(text, tone = "idle") {
@@ -969,17 +964,18 @@ function setActionSettingsStatus(text, tone = "idle") {
 function saveActionTextConfig({ silent = false } = {}) {
   const invalidAction = findInvalidActionText();
   if (invalidAction) {
-    setActionSettingsStatus(`${invalidAction.label} 的显示文字和语音播报都不能为空。`, "error");
+    setActionSettingsStatus(`${invalidAction.label} 的表达文字不能为空。`, "error");
     return false;
   }
 
   const overrides = currentActionTextOverrides();
   try {
     if (Object.keys(overrides).length === 0) {
-      window.localStorage.removeItem(ACTION_CONFIG_STORAGE_KEY);
+      window.localStorage.removeItem(ACTION_TEXT_STORAGE_KEY);
     } else {
-      window.localStorage.setItem(ACTION_CONFIG_STORAGE_KEY, JSON.stringify(overrides, null, 2));
+      window.localStorage.setItem(ACTION_TEXT_STORAGE_KEY, JSON.stringify(overrides, null, 2));
     }
+    LEGACY_ACTION_CONFIG_STORAGE_KEYS.forEach((key) => window.localStorage.removeItem(key));
 
     if (!silent) {
       setActionSettingsStatus("已保存到本机。", "success");
@@ -994,8 +990,9 @@ function saveActionTextConfig({ silent = false } = {}) {
 
 function loadSavedActionTextConfig() {
   try {
-    const raw = window.localStorage.getItem(ACTION_CONFIG_STORAGE_KEY);
+    const raw = window.localStorage.getItem(ACTION_TEXT_STORAGE_KEY);
     applyActionTextOverrides(raw ? JSON.parse(raw) : {});
+    LEGACY_ACTION_CONFIG_STORAGE_KEYS.forEach((key) => window.localStorage.removeItem(key));
     setActionSettingsStatus(raw ? "已载入本机自定义含义。" : "使用当前默认配置。");
     return true;
   } catch {
@@ -1005,13 +1002,13 @@ function loadSavedActionTextConfig() {
   }
 }
 
-function updateActionTextValue(actionId, field, value) {
+function updateActionTextValue(actionId, value) {
   const action = getActionConfigById(actionId);
-  if (!action || !ACTION_TEXT_FIELDS.includes(field)) {
+  if (!action) {
     return;
   }
 
-  action[field] = value;
+  setActionText(action, value);
   updateActionGuide();
   setActionSettingsStatus("有未保存修改。", "dirty");
 }
@@ -1023,8 +1020,7 @@ function restoreActionTextDefault(actionId) {
     return;
   }
 
-  action.displayText = defaults.displayText;
-  action.speechText = defaults.speechText;
+  setActionText(action, getActionText(defaults));
   renderActionSettings();
   updateActionGuide();
   saveActionTextConfig({ silent: true });
@@ -1065,24 +1061,21 @@ function renderActionSettings() {
     const fields = document.createElement("div");
     fields.className = "action-settings-fields";
 
-    ACTION_TEXT_FIELDS.forEach((field) => {
-      const label = document.createElement("label");
-      label.className = "action-settings-field";
+    const fieldLabel = document.createElement("label");
+    fieldLabel.className = "action-settings-field";
 
-      const caption = document.createElement("span");
-      caption.textContent = field === "displayText" ? "屏幕显示" : "语音播报";
+    const caption = document.createElement("span");
+    caption.textContent = "表达文字";
 
-      const input = document.createElement("input");
-      input.type = "text";
-      input.value = action[field] || "";
-      input.dataset.actionId = action.id;
-      input.dataset.field = field;
-      input.autocomplete = "off";
-      input.maxLength = 60;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = getActionText(action);
+    input.dataset.actionId = action.id;
+    input.autocomplete = "off";
+    input.maxLength = 60;
 
-      label.append(caption, input);
-      fields.append(label);
-    });
+    fieldLabel.append(caption, input);
+    fields.append(fieldLabel);
 
     const actions = document.createElement("div");
     actions.className = "action-settings-item-actions";
@@ -1110,7 +1103,7 @@ function renderActionSettings() {
 function exportActionTextConfig() {
   const invalidAction = findInvalidActionText();
   if (invalidAction) {
-    setActionSettingsStatus(`${invalidAction.label} 的显示文字和语音播报都不能为空。`, "error");
+    setActionSettingsStatus(`${invalidAction.label} 的表达文字不能为空。`, "error");
     return;
   }
 
@@ -1134,7 +1127,7 @@ async function importActionTextConfig(file) {
     applyActionTextOverrides(payload);
     const invalidAction = findInvalidActionText();
     if (invalidAction) {
-      throw new Error(`${invalidAction.label} 的显示文字和语音播报都不能为空。`);
+      throw new Error(`${invalidAction.label} 的表达文字不能为空。`);
     }
     renderActionSettings();
     updateActionGuide();
@@ -1209,7 +1202,7 @@ function updateActionGuide() {
     label.textContent = action.label;
 
     const text = document.createElement("span");
-    text.textContent = action.displayText;
+    text.textContent = getActionText(action);
 
     item.append(label, text);
 
@@ -1226,15 +1219,15 @@ function updateActionGuide() {
 function startActionConfirmation(action, label = action?.label || "") {
   state.pendingConfirmation = {
     label,
-    confirmedText: action.speechText || action.displayText,
+    confirmedText: getActionText(action),
     expiresAt: performance.now() + CONFIRMATION_TIMEOUT_MS,
   };
-  const prompt = `检测到：${action.displayText}。连续两次短眨确认，长闭眼取消。`;
+  const prompt = `检测到：${getActionText(action)}。连续两次短眨确认，长闭眼取消。`;
   announce(prompt, `${label}待确认`, { shouldSpeak: true });
 }
 
 function announceAction(action, label = action?.label || "") {
-  const text = action.speechText || action.displayText;
+  const text = getActionText(action);
   announce(text, label, { shouldSpeak: true });
   if (action.flash) {
     triggerEmergencyFlash();
@@ -2434,7 +2427,7 @@ function handleSmileGesture(event, label) {
     label,
     detectedAt: performance.now(),
   };
-  setCommunicationMessage(`微笑一次已记录；完全放松约半秒后再次微笑会表达“${doubleSmileAction.displayText}”。`, "微笑 1/2");
+  setCommunicationMessage(`微笑一次已记录；完全放松约半秒后再次微笑会表达“${getActionText(doubleSmileAction)}”。`, "微笑 1/2");
   addLog("微笑 1/2：等待第二次明确微笑");
   state.gestureSequences.smileTimer = window.setTimeout(() => {
     const pending = state.gestureSequences.smilePending;
@@ -2492,7 +2485,7 @@ function handleGestureEvent(event, label) {
     state.gestureSequences.mouthOpenTimes.push(now);
 
     if (state.gestureSequences.mouthOpenTimes.length < 2) {
-      const targetText = action?.displayText || "张嘴两次含义";
+      const targetText = getActionText(action) || "张嘴两次含义";
       setCommunicationMessage(`张嘴一次已记录，请在 6 秒内再次微张嘴表达“${targetText}”。`, "张嘴 1/2");
       addLog(`${label} 1/2：${Math.round(event.duration)}ms，等待第二次张嘴`);
       finishPendingTestRecord({ note: "mouth_open_1_of_2" });
@@ -3473,7 +3466,7 @@ actionSettingsList?.addEventListener("input", (event) => {
     return;
   }
 
-  updateActionTextValue(input.dataset.actionId, input.dataset.field, input.value);
+  updateActionTextValue(input.dataset.actionId, input.value);
 });
 
 actionSettingsList?.addEventListener("click", (event) => {
@@ -3497,9 +3490,9 @@ actionSettingsList?.addEventListener("click", (event) => {
   }
 
   if (button.dataset.action === "test") {
-    const text = normalizeActionText(action.speechText || action.displayText);
+    const text = getActionText(action);
     if (!text) {
-      setActionSettingsStatus(`${action.label} 的语音播报不能为空。`, "error");
+      setActionSettingsStatus(`${action.label} 的表达文字不能为空。`, "error");
       return;
     }
     speak(text);
