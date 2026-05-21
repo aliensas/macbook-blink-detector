@@ -35,6 +35,8 @@ const codeBuffer = document.querySelector("#codeBuffer");
 const repeatSpeechButton = document.querySelector("#repeatSpeechButton");
 const clearSpeechButton = document.querySelector("#clearSpeechButton");
 const pauseRecognitionButton = document.querySelector("#pauseRecognitionButton");
+const actionGuideMode = document.querySelector("#actionGuideMode");
+const actionGuideList = document.querySelector("#actionGuideList");
 const blinkCodeToggle = document.querySelector("#blinkCodeToggle");
 const browToggle = document.querySelector("#browToggle");
 const mouthToggle = document.querySelector("#mouthToggle");
@@ -82,7 +84,6 @@ const engineerPanel = document.querySelector(".engineer-panel");
 const APP_BASE_URL = new URL(import.meta.env.BASE_URL, window.location.href);
 const MODEL_URL = new URL("mediapipe/models/face_landmarker.task", APP_BASE_URL).toString();
 const WASM_URL = new URL("mediapipe/wasm", APP_BASE_URL).toString();
-const SERVICE_WORKER_URL = new URL("sw.js", APP_BASE_URL).toString();
 const ENGINEERING_MODE = new URLSearchParams(window.location.search).has("debug");
 
 document.documentElement.classList.toggle("engineering-mode", ENGINEERING_MODE);
@@ -131,41 +132,178 @@ const BLINK_SYMBOLS = {
   longMinMs: 700,
   longMaxMs: 2800,
   restMinMs: 3500,
+  singleSymbolDecodeDelayMs: 2500,
   decodeDelayMs: 1200,
+  closedDeferMs: 120,
+  finalDecodeDelayMs: 350,
   longSequenceDecodeDelayMs: 2200,
   separatedLongWindowMs: 6000,
 };
 
-const DIRECT_BLINK_CODES = {
-  "..": { text: "我需要喝水或润口", speak: true },
-  "...": { text: "紧急求助，请马上查看", speak: true },
-  "--": { text: "我想休息，暂停识别 5 分钟", speak: true, pauseMs: 5 * 60 * 1000 },
-};
-
-const CONFIRMATION_BLINK_CODES = {
-  ".-": {
-    label: "口腔护理确认",
-    prompt: "检测到可能需要口腔护理。连续两次短眨确认，长闭眼取消。",
-    confirmedText: "我可能有口腔不适，请查看是否需要润口、清理口腔或吸痰。",
+const DEFAULT_ACTION_CONFIG = [
+  {
+    id: "blink_double_short_help",
+    gestureId: "blink_double_short",
+    label: "短眨2次",
+    displayText: "我需要帮助，请过来一下",
+    speechText: "我需要帮助，请过来一下",
+    instruction: "连续短眨两次；每次闭眼 0.1-0.5 秒，并明显睁开。",
+    category: "help",
+    input: "blink",
+    enabled: true,
+    speak: true,
+    requiresConfirmation: false,
+    locked: false,
   },
-  "-.": {
-    label: "体位调整确认",
-    prompt: "检测到可能需要调整体位。连续两次短眨确认，长闭眼取消。",
-    confirmedText: "请帮我检查并调整体位。",
+  {
+    id: "blink_triple_short_emergency",
+    gestureId: "blink_triple_short",
+    label: "短眨3次",
+    displayText: "紧急求助，请马上查看",
+    speechText: "紧急求助，请马上查看",
+    instruction: "连续短眨三次；每次都要闭眼后再睁开。",
+    category: "emergency",
+    input: "blink",
+    enabled: true,
+    speak: true,
+    requiresConfirmation: false,
+    locked: true,
+    flash: true,
   },
-};
+  {
+    id: "blink_double_long_rest",
+    gestureId: "blink_double_long",
+    label: "长闭眼2次",
+    displayText: "我想休息",
+    speechText: "我想休息",
+    instruction: "长闭眼一次约 1 秒；有效范围 0.7-2.8 秒，必须睁开。6 秒内做两次。",
+    category: "control",
+    input: "blink",
+    enabled: true,
+    speak: true,
+    requiresConfirmation: false,
+    locked: false,
+  },
+  {
+    id: "blink_short_long_scratch",
+    gestureId: "blink_short_long",
+    label: "短眨+长闭眼",
+    displayText: "我想挠痒痒",
+    speechText: "我想挠痒痒",
+    instruction: "先短眨并睁开；2.5 秒内开始长闭眼约 1 秒，最后必须睁开才触发。",
+    category: "care",
+    input: "blink",
+    enabled: true,
+    speak: true,
+    requiresConfirmation: false,
+    locked: false,
+  },
+  {
+    id: "blink_long_short_position",
+    gestureId: "blink_long_short",
+    label: "长闭眼+短眨",
+    displayText: "我想调整体位",
+    speechText: "我想调整体位",
+    instruction: "先长闭眼约 1 秒并睁开；再短眨一次。",
+    category: "care",
+    input: "blink",
+    enabled: true,
+    speak: true,
+    requiresConfirmation: false,
+    locked: false,
+  },
+  {
+    id: "brow_raise_yes",
+    gestureId: "brow_raise",
+    label: "抬眉",
+    displayText: "是 / 确认",
+    speechText: "是，确认",
+    instruction: "抬眉保持约 0.5 秒；校准确认后可直接表达是/确认。",
+    category: "control",
+    input: "brow",
+    enabled: true,
+    speak: true,
+    requiresConfirmation: false,
+    locked: false,
+  },
+  {
+    id: "mouth_double_open_suction",
+    gestureId: "mouth_double_open",
+    label: "张嘴2次",
+    displayText: "我需要吸痰，请马上查看",
+    speechText: "我需要吸痰，请马上查看",
+    instruction: "张嘴保持约 0.8 秒并闭合，4 秒内重复两次。",
+    category: "care",
+    input: "mouth",
+    enabled: true,
+    speak: true,
+    requiresConfirmation: false,
+    locked: false,
+  },
+  {
+    id: "smile_status",
+    gestureId: "smile",
+    label: "微笑",
+    displayText: "谢谢，可以，我还好",
+    speechText: "谢谢，可以，我还好",
+    instruction: "微笑保持约 0.5 秒；单次用于情绪/状态表达。",
+    category: "emotion",
+    input: "smile",
+    enabled: true,
+    speak: true,
+    requiresConfirmation: false,
+    locked: false,
+  },
+  {
+    id: "smile_double_love",
+    gestureId: "smile_double",
+    label: "微笑2次",
+    displayText: "我爱你们",
+    speechText: "我爱你们",
+    instruction: "连续微笑两次；第二次微笑触发表达。",
+    category: "emotion",
+    input: "smile",
+    enabled: true,
+    speak: true,
+    requiresConfirmation: false,
+    locked: false,
+  },
+  {
+    id: "head_shake_no",
+    gestureId: "head_shake",
+    label: "摇头",
+    displayText: "否，不是，取消",
+    speechText: "否，不是，取消",
+    instruction: "轻微左-右-左或右-左-右摇头；不需要大幅度。",
+    category: "control",
+    input: "head",
+    enabled: true,
+    speak: true,
+    requiresConfirmation: false,
+    locked: false,
+  },
+];
 
-const GESTURE_MESSAGES = {
-  BROW_RAISE: "抬眉确认",
-  MOUTH_OPEN: "张嘴吸痰",
-  SMILE: "微笑表达",
-  HEAD_SHAKE: "摇头取消",
+const ACTION_CONFIG = DEFAULT_ACTION_CONFIG.map((action) => ({ ...action }));
+const BLINK_CODE_GESTURE_IDS = {
+  "..": "blink_double_short",
+  "...": "blink_triple_short",
+  "--": "blink_double_long",
+  ".-": "blink_short_long",
+  "-.": "blink_long_short",
 };
-
+const EVENT_GESTURE_IDS = {
+  BROW_RAISE: "brow_raise",
+  MOUTH_OPEN: "mouth_open",
+  MOUTH_DOUBLE_OPEN: "mouth_double_open",
+  SMILE: "smile",
+  SMILE_DOUBLE: "smile_double",
+  HEAD_SHAKE: "head_shake",
+};
 const CONFIRMATION_TIMEOUT_MS = 10 * 1000;
 const MOUTH_DOUBLE_WINDOW_MS = 4000;
+const SMILE_DOUBLE_WINDOW_MS = 1800;
 const CALIBRATION_STORAGE_KEY = "alsFacialAac.defaultPatientCalibration.v1";
-const PWA_PROTOCOLS = new Set(["http:", "https:"]);
 const CALIBRATION_STEPS = [
   {
     id: "position",
@@ -252,6 +390,8 @@ const state = {
   },
   gestureSequences: {
     mouthOpenTimes: [],
+    smileTimer: 0,
+    smilePending: null,
   },
   calibration: {
     active: false,
@@ -285,11 +425,15 @@ function setStatus(label, mode = "idle") {
   runtimeStatus.innerHTML = `<span class="dot dot-${mode}"></span><span>${label}</span>`;
 }
 
+function isPausedStateActive() {
+  return state.pausedUntil !== 0;
+}
+
 function addLog(message) {
   state.sessionEvents.push({
     time: new Date().toISOString(),
     message,
-    mode: state.pendingConfirmation ? "confirm" : state.pausedUntil > performance.now() ? "paused" : "direct",
+    mode: state.pendingConfirmation ? "confirm" : isPausedStateActive() ? "paused" : "direct",
   });
 
   if (state.sessionEvents.length > 300) {
@@ -603,34 +747,21 @@ function setControlsBusy(isBusy) {
   stopButton.disabled = isBusy || !state.running;
 }
 
-function isAppleMobileDevice() {
-  return (
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-  );
-}
-
-function isStandaloneDisplay() {
-  return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
-}
-
-function isPwaRegistrationContext() {
-  return PWA_PROTOCOLS.has(window.location.protocol) && window.isSecureContext;
-}
-
-function registerPwaServiceWorker() {
-  if (!("serviceWorker" in navigator) || !isPwaRegistrationContext()) {
-    return;
+// Temporary cleanup for old PWA builds; the current app no longer registers a service worker.
+function clearLegacyOfflineCache() {
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      registrations
+        .filter((registration) => registration.scope.startsWith(window.location.origin))
+        .forEach((registration) => registration.unregister());
+    });
   }
 
-  navigator.serviceWorker.register(SERVICE_WORKER_URL).catch(() => {
-    addLog("离线缓存注册失败，仍可在线使用");
-  });
-}
-
-function applyMobileRuntimeHints() {
-  document.documentElement.classList.toggle("is-apple-mobile", isAppleMobileDevice());
-  document.documentElement.classList.toggle("is-standalone", isStandaloneDisplay());
+  if ("caches" in window) {
+    caches.keys().then((keys) => {
+      keys.filter((key) => key.startsWith("als-facial-aac-")).forEach((key) => caches.delete(key));
+    });
+  }
 }
 
 function resetDetectionWindow() {
@@ -660,6 +791,11 @@ function resetSignalBaseline() {
 
 function resetGestureSequences() {
   state.gestureSequences.mouthOpenTimes = [];
+  if (state.gestureSequences.smileTimer) {
+    window.clearTimeout(state.gestureSequences.smileTimer);
+  }
+  state.gestureSequences.smileTimer = 0;
+  state.gestureSequences.smilePending = null;
 }
 
 function median(values) {
@@ -674,6 +810,112 @@ function median(values) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function getActionConfigByGestureId(gestureId) {
+  return ACTION_CONFIG.find((action) => action.gestureId === gestureId && action.enabled) || null;
+}
+
+function isActionGuideVisible(action) {
+  if (!action.enabled) {
+    return false;
+  }
+
+  if (action.input === "blink") {
+    return blinkCodeToggle.checked;
+  }
+
+  if (action.input === "brow") {
+    return browToggle.checked;
+  }
+
+  if (action.input === "mouth") {
+    return mouthToggle.checked;
+  }
+
+  if (action.input === "smile") {
+    return smileToggle.checked;
+  }
+
+  if (action.input === "head") {
+    return headShakeToggle.checked;
+  }
+
+  return false;
+}
+
+function updateActionGuide() {
+  if (!actionGuideMode || !actionGuideList) {
+    return;
+  }
+
+  const visibleActions = ACTION_CONFIG.filter(isActionGuideVisible);
+  const optionalInputCount = new Set(
+    visibleActions.filter((action) => action.input !== "blink").map((action) => action.input),
+  ).size;
+  actionGuideMode.textContent = optionalInputCount > 0 ? `已启用 ${optionalInputCount} 类可选输入` : "仅眨眼";
+  actionGuideList.innerHTML = "";
+
+  if (visibleActions.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "action-guide-empty";
+    empty.textContent = "当前未启用动作输入。";
+    actionGuideList.append(empty);
+    return;
+  }
+
+  visibleActions.forEach((action) => {
+    const item = document.createElement("div");
+    item.className = "action-guide-item";
+
+    const label = document.createElement("strong");
+    label.textContent = action.label;
+
+    const text = document.createElement("span");
+    text.textContent = action.displayText;
+
+    item.append(label, text);
+
+    if (action.instruction) {
+      const detail = document.createElement("small");
+      detail.textContent = action.instruction;
+      item.append(detail);
+    }
+
+    actionGuideList.append(item);
+  });
+}
+
+function startActionConfirmation(action, label = action?.label || "") {
+  state.pendingConfirmation = {
+    label,
+    confirmedText: action.speechText || action.displayText,
+    expiresAt: performance.now() + CONFIRMATION_TIMEOUT_MS,
+  };
+  const prompt = `检测到：${action.displayText}。连续两次短眨确认，长闭眼取消。`;
+  announce(prompt, `${label}待确认`, { shouldSpeak: true });
+}
+
+function announceAction(action, label = action?.label || "") {
+  const text = action.speechText || action.displayText;
+  announce(text, label, { shouldSpeak: action.speak });
+  if (action.flash) {
+    triggerEmergencyFlash();
+  }
+}
+
+function executeConfiguredAction(action, label = action?.label || "") {
+  if (!action) {
+    return false;
+  }
+
+  if (action.requiresConfirmation) {
+    startActionConfirmation(action, label);
+    return true;
+  }
+
+  announceAction(action, label);
+  return true;
 }
 
 function setCommunicationMessage(text, gestureLabel = "") {
@@ -1423,14 +1665,6 @@ function getActiveConfirmation(now = performance.now()) {
   return null;
 }
 
-function startConfirmation(config) {
-  state.pendingConfirmation = {
-    ...config,
-    expiresAt: performance.now() + CONFIRMATION_TIMEOUT_MS,
-  };
-  announce(config.prompt, config.label, { shouldSpeak: true });
-}
-
 function resolveSeparatedLongBlinkRest({ code, actionStartedAt = null, actionEndedAt = null, decodedAt = null } = {}) {
   if (code !== "-" || !hasConfirmedCalibration()) {
     return false;
@@ -1447,8 +1681,8 @@ function resolveSeparatedLongBlinkRest({ code, actionStartedAt = null, actionEnd
 
   if (!hasFirstLong) {
     state.pendingSeparatedLongAt = firstLongAt;
-    setCommunicationMessage("已收到一次长闭眼；6 秒内再做一次会进入休息。", "休息 1/2");
-    addLog("一次长闭眼：等待第二次长闭眼触发休息");
+    setCommunicationMessage("已收到一次长闭眼；6 秒内再做一次会表达“我想休息”。", "长闭眼 1/2");
+    addLog("一次长闭眼：等待第二次长闭眼表达我想休息");
     finishPendingTestRecord({ note: "waiting_second_long_blink_for_rest" });
     return true;
   }
@@ -1459,11 +1693,8 @@ function resolveSeparatedLongBlinkRest({ code, actionStartedAt = null, actionEnd
     received: "--",
     label: `短码 ${displayBlinkCode("--")}`,
   });
-  const phrase = DIRECT_BLINK_CODES["--"];
-  announce(phrase.text, `短码 ${displayBlinkCode("--")}`, {
-    shouldSpeak: phrase.speak,
-  });
-  pauseRecognition(phrase.pauseMs, { preserveMessage: true });
+  const action = getActionConfigByGestureId(BLINK_CODE_GESTURE_IDS["--"]);
+  executeConfiguredAction(action, action?.label || `短码 ${displayBlinkCode("--")}`);
   return true;
 }
 
@@ -1501,6 +1732,12 @@ function resolvePendingConfirmation(code) {
 }
 
 function decodeBlinkCode() {
+  if (state.blinkClosedAt !== null || state.blinkWasClosed) {
+    window.clearTimeout(state.blinkDecodeTimer);
+    state.blinkDecodeTimer = window.setTimeout(decodeBlinkCode, BLINK_SYMBOLS.closedDeferMs);
+    return;
+  }
+
   const code = state.blinkCodeBuffer.join("");
   if (!code) {
     clearBlinkCodeBuffer();
@@ -1557,27 +1794,14 @@ function decodeBlinkCode() {
       return;
     }
 
-    addLog("忽略单次长闭眼（仅确认场景中用于取消；校准后两次长闭眼用于休息）");
+    addLog("忽略单次长闭眼（仅确认场景中用于取消；校准后两次长闭眼表达我想休息）");
     finishPendingTestRecord({ note: "single_long_blink_ignored" });
     return;
   }
 
-  const confirmation = CONFIRMATION_BLINK_CODES[code];
-  if (confirmation) {
-    clearSeparatedLongBlink();
-    if (!hasConfirmedCalibration()) {
-      setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成并确认引导校准后才进入确认流程。`, "未确认");
-      addLog(`短码 ${displayBlinkCode(code)} 已识别，因引导校准未确认而未进入确认流程`);
-      finishPendingTestRecord({ note: "calibration_not_confirmed" });
-      return;
-    }
-
-    startConfirmation(confirmation);
-    return;
-  }
-
-  const phrase = DIRECT_BLINK_CODES[code];
-  if (phrase) {
+  const gestureId = BLINK_CODE_GESTURE_IDS[code];
+  const action = getActionConfigByGestureId(gestureId);
+  if (action) {
     clearSeparatedLongBlink();
     if (!hasConfirmedCalibration()) {
       setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成并确认引导校准后才播报短语。`, "未确认");
@@ -1586,17 +1810,7 @@ function decodeBlinkCode() {
       return;
     }
 
-    announce(phrase.text, `短码 ${displayBlinkCode(code)}`, {
-      shouldSpeak: phrase.speak,
-    });
-
-    if (code === "...") {
-      triggerEmergencyFlash();
-    }
-
-    if (phrase.pauseMs) {
-      pauseRecognition(phrase.pauseMs, { preserveMessage: true });
-    }
+    executeConfiguredAction(action, action.label || `短码 ${displayBlinkCode(code)}`);
     return;
   }
 
@@ -1629,14 +1843,30 @@ function enqueueBlinkSymbol(symbol, meta = {}) {
 
   updateCodeBuffer();
   window.clearTimeout(state.blinkDecodeTimer);
-  const decodeDelay = state.blinkCodeBuffer.includes("-")
-    ? BLINK_SYMBOLS.longSequenceDecodeDelayMs
-    : BLINK_SYMBOLS.decodeDelayMs;
+  const decodeDelay = getBlinkDecodeDelay();
   state.blinkDecodeTimer = window.setTimeout(decodeBlinkCode, decodeDelay);
 }
 
-function pauseRecognition(durationMs = 5 * 60 * 1000, { preserveMessage = false } = {}) {
-  state.pausedUntil = performance.now() + durationMs;
+function getBlinkDecodeDelay() {
+  const code = state.blinkCodeBuffer.join("");
+
+  if (state.blinkCodeOverflow || code.length >= 3) {
+    return BLINK_SYMBOLS.finalDecodeDelayMs;
+  }
+
+  if (code.length === 1) {
+    return BLINK_SYMBOLS.singleSymbolDecodeDelayMs;
+  }
+
+  if (BLINK_CODE_GESTURE_IDS[code]) {
+    return code === ".." ? BLINK_SYMBOLS.decodeDelayMs : BLINK_SYMBOLS.finalDecodeDelayMs;
+  }
+
+  return code.includes("-") ? BLINK_SYMBOLS.longSequenceDecodeDelayMs : BLINK_SYMBOLS.decodeDelayMs;
+}
+
+function pauseRecognition({ preserveMessage = false } = {}) {
+  state.pausedUntil = Number.POSITIVE_INFINITY;
   clearBlinkCodeBuffer();
   clearSeparatedLongBlink();
   clearPendingConfirmation();
@@ -1786,24 +2016,77 @@ const headShakeDetector = {
   },
 };
 
-function handleGestureEvent(event, label) {
-  const message = GESTURE_MESSAGES[event.name];
-  if (!message) {
-    return;
-  }
-
-  const detectedAt = performance.now();
+function recordGestureAction(event, label, received = event.name, detectedAt = performance.now()) {
   recordTestAction({
     type: "gesture",
     source: event.name,
     label,
-    received: event.name,
+    received,
     actionStartedAtMs: detectedAt - event.duration,
     actionEndedAtMs: detectedAt,
     detectedAtMs: detectedAt,
     durationMs: event.duration,
     note: `peak=${(event.value || 0).toFixed(3)}`,
   });
+  return detectedAt;
+}
+
+function handleSmileGesture(event, label) {
+  const singleSmileAction = getActionConfigByGestureId(EVENT_GESTURE_IDS.SMILE);
+  const doubleSmileAction = getActionConfigByGestureId(EVENT_GESTURE_IDS.SMILE_DOUBLE);
+
+  if (!singleSmileAction && !doubleSmileAction) {
+    recordGestureAction(event, label);
+    addLog(`${label}动作已识别，但没有启用对应语义`);
+    finishPendingTestRecord({ note: "action_config_disabled" });
+    return;
+  }
+
+  if (!doubleSmileAction) {
+    recordGestureAction(event, label);
+    executeConfiguredAction(singleSmileAction, singleSmileAction.label);
+    return;
+  }
+
+  if (state.gestureSequences.smileTimer) {
+    window.clearTimeout(state.gestureSequences.smileTimer);
+    state.gestureSequences.smileTimer = 0;
+    state.gestureSequences.smilePending = null;
+    recordGestureAction(event, doubleSmileAction.label, EVENT_GESTURE_IDS.SMILE_DOUBLE);
+    executeConfiguredAction(doubleSmileAction, doubleSmileAction.label);
+    return;
+  }
+
+  state.gestureSequences.smilePending = {
+    event: { ...event },
+    label,
+    detectedAt: performance.now(),
+  };
+  setCommunicationMessage("微笑一次已记录；再次微笑会表达“我爱你们”。", "微笑 1/2");
+  addLog("微笑 1/2：等待第二次微笑");
+  state.gestureSequences.smileTimer = window.setTimeout(() => {
+    const pending = state.gestureSequences.smilePending;
+    state.gestureSequences.smileTimer = 0;
+    state.gestureSequences.smilePending = null;
+
+    if (!pending || !singleSmileAction) {
+      return;
+    }
+
+    recordGestureAction(pending.event, pending.label, EVENT_GESTURE_IDS.SMILE, pending.detectedAt);
+    executeConfiguredAction(singleSmileAction, singleSmileAction.label);
+  }, SMILE_DOUBLE_WINDOW_MS);
+}
+
+function handleGestureEvent(event, label) {
+  const gestureId = EVENT_GESTURE_IDS[event.name];
+  if (!gestureId) {
+    return;
+  }
+
+  if (event.name !== "SMILE" || state.calibration.activeTestCode || !hasConfirmedCalibration()) {
+    recordGestureAction(event, label);
+  }
 
   if (state.calibration.activeTestCode) {
     setCommunicationMessage(`短码测试中，${label}动作已记录但不执行。`, `${label}测试保护`);
@@ -1823,7 +2106,8 @@ function handleGestureEvent(event, label) {
     if (confirmPendingGesture(label)) {
       return;
     }
-    announce("确认", message, { shouldSpeak: true });
+    const action = getActionConfigByGestureId(EVENT_GESTURE_IDS.BROW_RAISE);
+    executeConfiguredAction(action, action?.label || label);
     return;
   }
 
@@ -1835,19 +2119,20 @@ function handleGestureEvent(event, label) {
     state.gestureSequences.mouthOpenTimes.push(now);
 
     if (state.gestureSequences.mouthOpenTimes.length < 2) {
-      setCommunicationMessage("张嘴一次已记录，请在 4 秒内再次张嘴触发吸痰提示。", message);
+      setCommunicationMessage("张嘴一次已记录，请在 4 秒内再次张嘴触发吸痰提示。", "张嘴 1/2");
       addLog(`${label} 1/2：${Math.round(event.duration)}ms，等待第二次张嘴`);
       finishPendingTestRecord({ note: "mouth_open_1_of_2" });
       return;
     }
 
     resetGestureSequences();
-    announce("我需要吸痰，请马上查看。", "张嘴两次", { shouldSpeak: true });
+    const action = getActionConfigByGestureId(EVENT_GESTURE_IDS.MOUTH_DOUBLE_OPEN);
+    executeConfiguredAction(action, action?.label || "张嘴2次");
     return;
   }
 
   if (event.name === "SMILE") {
-    announce("谢谢，可以，我还好。", message, { shouldSpeak: true });
+    handleSmileGesture(event, label);
     return;
   }
 
@@ -1855,7 +2140,8 @@ function handleGestureEvent(event, label) {
     if (cancelPendingGesture(label)) {
       return;
     }
-    announce("否，不是，取消。", message, { shouldSpeak: true });
+    const action = getActionConfigByGestureId(EVENT_GESTURE_IDS.HEAD_SHAKE);
+    executeConfiguredAction(action, action?.label || label);
   }
 }
 
@@ -2173,9 +2459,7 @@ async function startCamera(deviceId = state.selectedDeviceId) {
     addLog("当前浏览器无法访问摄像头");
     showDiagnostic(
       "当前浏览器不支持摄像头",
-      isAppleMobileDevice()
-        ? "请用 iPhone Safari 打开 HTTPS 地址，或从主屏幕安装后的应用打开，并允许摄像头权限。"
-        : `请用 Chrome 或 Safari 打开 ${window.location.href}，再允许摄像头权限。`,
+      `请用 Chrome 或 Safari 打开 ${window.location.href}，再允许摄像头权限。`,
     );
     return;
   }
@@ -2185,9 +2469,7 @@ async function startCamera(deviceId = state.selectedDeviceId) {
     addLog("摄像头需要 HTTPS 或本机安全环境");
     showDiagnostic(
       "摄像头需要安全连接",
-      isAppleMobileDevice()
-        ? "iPhone Safari 必须通过 HTTPS 地址访问才允许摄像头。请部署到 HTTPS 后再添加到主屏幕。"
-        : "请使用 HTTPS 地址，或在本机 localhost/桌面应用中打开。",
+      "请使用 HTTPS 地址，或在本机 localhost/桌面应用中打开。",
     );
     return;
   }
@@ -2664,8 +2946,17 @@ ttsToggle.addEventListener("change", () => {
   }
 });
 
+blinkCodeToggle.addEventListener("change", () => {
+  clearBlinkCodeBuffer();
+  clearSeparatedLongBlink();
+  updateActionGuide();
+});
+
 [browToggle, mouthToggle, smileToggle, headShakeToggle].forEach((toggle) => {
-  toggle.addEventListener("change", resetGestureSequences);
+  toggle.addEventListener("change", () => {
+    resetGestureSequences();
+    updateActionGuide();
+  });
 });
 
 calibrationStartButton.addEventListener("click", startCalibrationGuide);
@@ -2695,14 +2986,14 @@ recordingExportJsonButton.addEventListener("click", exportRecordingJson);
 recordingExportCsvButton.addEventListener("click", exportRecordingCsv);
 
 pauseRecognitionButton.addEventListener("click", () => {
-  if (state.pausedUntil > performance.now()) {
+  if (isPausedStateActive()) {
     resumeRecognition();
     addLog("识别已恢复");
     return;
   }
 
   pauseRecognition();
-  addLog("识别已暂停 5 分钟");
+  addLog("识别已暂停，点击继续后恢复");
 });
 
 copyUrlButton.addEventListener("click", async () => {
@@ -2728,7 +3019,8 @@ navigator.mediaDevices?.addEventListener?.("devicechange", () => {
 });
 
 window.addEventListener("resize", resizeCanvas);
-window.matchMedia?.("(display-mode: standalone)")?.addEventListener?.("change", applyMobileRuntimeHints);
+
+clearLegacyOfflineCache();
 
 refreshCameraList().catch(() => {
   const option = document.createElement("option");
@@ -2737,8 +3029,7 @@ refreshCameraList().catch(() => {
   cameraSelect.append(option);
 });
 
-applyMobileRuntimeHints();
-registerPwaServiceWorker();
+updateActionGuide();
 updateRecordingUI();
 
 if (!loadSavedCalibrationProfile()) {

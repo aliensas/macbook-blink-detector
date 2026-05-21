@@ -5,15 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#080c14" />
     <meta name="color-scheme" content="dark" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="ALS AAC" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta
       name="description"
       content="ALS 面部微动作 AAC 输入原型，用摄像头识别低疲劳面部动作和眨眼短码。"
     />
-    <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="%BASE_URL%icons/apple-touch-icon.png" />
     <link rel="icon" href="%BASE_URL%icons/icon.svg" type="image/svg+xml" />
     <title>ALS 面部微动作 AAC 输入原型</title>
   </head>
@@ -143,12 +138,12 @@
             </div>
             <div class="gesture-bars">
               <div class="gesture-row">
-                <span>抬眉确认</span>
+                <span>抬眉 是/确认</span>
                 <meter id="browMeter" min="0" max="1" value="0"></meter>
                 <strong id="browValue">0.00</strong>
               </div>
               <div class="gesture-row">
-                <span>张嘴吸痰</span>
+                <span>张嘴两次 吸痰</span>
                 <meter id="mouthMeter" min="0" max="1" value="0"></meter>
                 <strong id="mouthValue">0.00</strong>
               </div>
@@ -169,12 +164,20 @@
             <label>输入</label>
             <div class="toggle-grid">
               <label><input id="blinkCodeToggle" type="checkbox" checked />眨眼短码</label>
-              <label><input id="browToggle" type="checkbox" />抬眉确认</label>
-              <label><input id="mouthToggle" type="checkbox" />张嘴吸痰</label>
-              <label><input id="headShakeToggle" type="checkbox" />摇头取消</label>
+              <label><input id="browToggle" type="checkbox" />抬眉 是/确认</label>
+              <label><input id="mouthToggle" type="checkbox" />张嘴两次吸痰</label>
+              <label><input id="headShakeToggle" type="checkbox" />摇头 否/取消</label>
               <label><input id="smileToggle" type="checkbox" />微笑表达</label>
               <label><input id="ttsToggle" type="checkbox" checked />语音</label>
             </div>
+          </div>
+
+          <div class="action-guide" aria-label="当前动作说明">
+            <div class="action-guide-header">
+              <span>当前动作说明</span>
+              <span id="actionGuideMode">仅眨眼</span>
+            </div>
+            <div class="action-guide-list" id="actionGuideList"></div>
           </div>
 
           <div class="calibration-panel" aria-label="引导校准">
@@ -212,11 +215,11 @@
                 <select id="guidedTestSelect" aria-label="短码测试项">
                   <option value=".">单次短眨：应忽略</option>
                   <option value="-">单次长闭眼：单独不播报</option>
-                  <option value="..">两次短眨：校准后喝水/润口</option>
+                  <option value="..">两次短眨：校准后请求帮助</option>
                   <option value="...">三次短眨：校准后紧急求助</option>
-                  <option value="--">两次长闭眼：校准后休息（6 秒内）</option>
-                  <option value=".-">短眨+长闭眼：口腔确认</option>
-                  <option value="-.">长闭眼+短眨：体位确认</option>
+                  <option value="--">两次长闭眼：校准后我想休息（6 秒内）</option>
+                  <option value=".-">短眨+长闭眼：校准后挠痒痒</option>
+                  <option value="-.">长闭眼+短眨：校准后调整体位</option>
                 </select>
                 <button class="ghost-action compact-action" id="guidedTestButton" type="button">测试</button>
               </div>
@@ -244,8 +247,9 @@
                     <option value=".-">短眨+长闭眼</option>
                     <option value="-.">长闭眼+短眨</option>
                     <option value="BROW_RAISE">抬眉</option>
-                    <option value="MOUTH_OPEN">张嘴</option>
+                    <option value="MOUTH_OPEN">张嘴两次</option>
                     <option value="SMILE">微笑</option>
+                    <option value="SMILE_DOUBLE">微笑两次</option>
                     <option value="HEAD_SHAKE">摇头</option>
                   </select>
                 </div>
