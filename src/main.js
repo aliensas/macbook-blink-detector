@@ -1,8 +1,24 @@
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
-import { createIcons, Camera, Circle, Copy, Download, Pause, Play, RotateCcw, Square, Trash2, Volume2 } from "lucide";
+import {
+  createIcons,
+  Camera,
+  Circle,
+  Copy,
+  Download,
+  Pause,
+  Play,
+  RotateCcw,
+  Save,
+  Square,
+  Trash2,
+  Upload,
+  Volume2,
+} from "lucide";
 import "./styles.css";
 
-createIcons({ icons: { Camera, Circle, Copy, Download, Pause, Play, RotateCcw, Square, Trash2, Volume2 } });
+createIcons({
+  icons: { Camera, Circle, Copy, Download, Pause, Play, RotateCcw, Save, Square, Trash2, Upload, Volume2 },
+});
 
 const video = document.querySelector("#cameraVideo");
 const canvas = document.querySelector("#overlayCanvas");
@@ -42,7 +58,6 @@ const browToggle = document.querySelector("#browToggle");
 const mouthToggle = document.querySelector("#mouthToggle");
 const smileToggle = document.querySelector("#smileToggle");
 const headShakeToggle = document.querySelector("#headShakeToggle");
-const ttsToggle = document.querySelector("#ttsToggle");
 const lastGesture = document.querySelector("#lastGesture");
 const browMeter = document.querySelector("#browMeter");
 const browValue = document.querySelector("#browValue");
@@ -80,6 +95,14 @@ const recordingMarkWrongButton = document.querySelector("#recordingMarkWrongButt
 const recordingExportJsonButton = document.querySelector("#recordingExportJsonButton");
 const recordingExportCsvButton = document.querySelector("#recordingExportCsvButton");
 const engineerPanel = document.querySelector(".engineer-panel");
+const actionSettingsList = document.querySelector("#actionSettingsList");
+const actionSettingsSaveButton = document.querySelector("#actionSettingsSaveButton");
+const actionSettingsCancelButton = document.querySelector("#actionSettingsCancelButton");
+const actionSettingsExportButton = document.querySelector("#actionSettingsExportButton");
+const actionSettingsImportButton = document.querySelector("#actionSettingsImportButton");
+const actionSettingsImportInput = document.querySelector("#actionSettingsImportInput");
+const actionSettingsResetButton = document.querySelector("#actionSettingsResetButton");
+const actionSettingsStatus = document.querySelector("#actionSettingsStatus");
 
 const APP_BASE_URL = new URL(import.meta.env.BASE_URL, window.location.href);
 const MODEL_URL = new URL("mediapipe/models/face_landmarker.task", APP_BASE_URL).toString();
@@ -152,7 +175,6 @@ const DEFAULT_ACTION_CONFIG = [
     category: "help",
     input: "blink",
     enabled: true,
-    speak: true,
     requiresConfirmation: false,
     locked: false,
   },
@@ -166,7 +188,6 @@ const DEFAULT_ACTION_CONFIG = [
     category: "emergency",
     input: "blink",
     enabled: true,
-    speak: true,
     requiresConfirmation: false,
     locked: true,
     flash: true,
@@ -181,7 +202,6 @@ const DEFAULT_ACTION_CONFIG = [
     category: "control",
     input: "blink",
     enabled: true,
-    speak: true,
     requiresConfirmation: false,
     locked: false,
   },
@@ -195,7 +215,6 @@ const DEFAULT_ACTION_CONFIG = [
     category: "care",
     input: "blink",
     enabled: true,
-    speak: true,
     requiresConfirmation: false,
     locked: false,
   },
@@ -209,7 +228,6 @@ const DEFAULT_ACTION_CONFIG = [
     category: "care",
     input: "blink",
     enabled: true,
-    speak: true,
     requiresConfirmation: false,
     locked: false,
   },
@@ -223,7 +241,6 @@ const DEFAULT_ACTION_CONFIG = [
     category: "control",
     input: "brow",
     enabled: true,
-    speak: true,
     requiresConfirmation: false,
     locked: false,
   },
@@ -237,7 +254,6 @@ const DEFAULT_ACTION_CONFIG = [
     category: "care",
     input: "mouth",
     enabled: true,
-    speak: true,
     requiresConfirmation: false,
     locked: false,
   },
@@ -251,7 +267,6 @@ const DEFAULT_ACTION_CONFIG = [
     category: "emotion",
     input: "smile",
     enabled: true,
-    speak: true,
     requiresConfirmation: false,
     locked: false,
   },
@@ -265,7 +280,6 @@ const DEFAULT_ACTION_CONFIG = [
     category: "emotion",
     input: "smile",
     enabled: true,
-    speak: true,
     requiresConfirmation: false,
     locked: false,
   },
@@ -279,7 +293,6 @@ const DEFAULT_ACTION_CONFIG = [
     category: "control",
     input: "head",
     enabled: true,
-    speak: true,
     requiresConfirmation: false,
     locked: false,
   },
@@ -322,6 +335,8 @@ const FACE_SCALE_STABILITY = {
   settleMs: 700,
 };
 const CALIBRATION_STORAGE_KEY = "alsFacialAac.defaultPatientCalibration.v1";
+const ACTION_CONFIG_STORAGE_KEY = "alsFacialAac.actionConfig.v2";
+const ACTION_TEXT_FIELDS = ["displayText", "speechText"];
 const CALIBRATION_STEPS = [
   {
     id: "position",
@@ -841,8 +856,301 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function getDefaultActionConfigById(id) {
+  return DEFAULT_ACTION_CONFIG.find((action) => action.id === id) || null;
+}
+
+function getActionConfigById(id) {
+  return ACTION_CONFIG.find((action) => action.id === id) || null;
+}
+
 function getActionConfigByGestureId(gestureId) {
   return ACTION_CONFIG.find((action) => action.gestureId === gestureId && action.enabled) || null;
+}
+
+function normalizeActionText(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function resetActionConfigTextFromDefaults() {
+  ACTION_CONFIG.forEach((action) => {
+    const defaults = getDefaultActionConfigById(action.id);
+    if (!defaults) {
+      return;
+    }
+
+    action.displayText = defaults.displayText;
+    action.speechText = defaults.speechText;
+  });
+}
+
+function extractActionTextOverrides(payload) {
+  const source = payload?.actions && typeof payload.actions === "object" ? payload.actions : payload;
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(source)
+      .map(([id, values]) => {
+        const defaults = getDefaultActionConfigById(id);
+        if (!defaults || !values || typeof values !== "object" || Array.isArray(values)) {
+          return null;
+        }
+
+        const override = {};
+        ACTION_TEXT_FIELDS.forEach((field) => {
+          if (field in values) {
+            const text = normalizeActionText(values[field]);
+            if (text) {
+              override[field] = text;
+            }
+          }
+        });
+
+        return Object.keys(override).length > 0 ? [id, override] : null;
+      })
+      .filter(Boolean),
+  );
+}
+
+function applyActionTextOverrides(payload) {
+  const overrides = extractActionTextOverrides(payload);
+  resetActionConfigTextFromDefaults();
+
+  Object.entries(overrides).forEach(([id, values]) => {
+    const action = getActionConfigById(id);
+    if (!action) {
+      return;
+    }
+
+    ACTION_TEXT_FIELDS.forEach((field) => {
+      if (values[field]) {
+        action[field] = values[field];
+      }
+    });
+  });
+}
+
+function currentActionTextOverrides() {
+  return Object.fromEntries(
+    ACTION_CONFIG.map((action) => {
+      const defaults = getDefaultActionConfigById(action.id);
+      if (!defaults) {
+        return null;
+      }
+
+      const override = {};
+      ACTION_TEXT_FIELDS.forEach((field) => {
+        const text = normalizeActionText(action[field]);
+        if (text && text !== defaults[field]) {
+          override[field] = text;
+        }
+      });
+
+      return Object.keys(override).length > 0 ? [action.id, override] : null;
+    }).filter(Boolean),
+  );
+}
+
+function findInvalidActionText() {
+  return ACTION_CONFIG.find((action) => ACTION_TEXT_FIELDS.some((field) => !normalizeActionText(action[field])));
+}
+
+function setActionSettingsStatus(text, tone = "idle") {
+  if (!actionSettingsStatus) {
+    return;
+  }
+
+  actionSettingsStatus.textContent = text;
+  actionSettingsStatus.dataset.tone = tone;
+}
+
+function saveActionTextConfig({ silent = false } = {}) {
+  const invalidAction = findInvalidActionText();
+  if (invalidAction) {
+    setActionSettingsStatus(`${invalidAction.label} 的显示文字和语音播报都不能为空。`, "error");
+    return false;
+  }
+
+  const overrides = currentActionTextOverrides();
+  try {
+    if (Object.keys(overrides).length === 0) {
+      window.localStorage.removeItem(ACTION_CONFIG_STORAGE_KEY);
+    } else {
+      window.localStorage.setItem(ACTION_CONFIG_STORAGE_KEY, JSON.stringify(overrides, null, 2));
+    }
+
+    if (!silent) {
+      setActionSettingsStatus("已保存到本机。", "success");
+      addLog("高级设置已保存到本机");
+    }
+    return true;
+  } catch {
+    setActionSettingsStatus("保存失败，请检查浏览器本地存储权限。", "error");
+    return false;
+  }
+}
+
+function loadSavedActionTextConfig() {
+  try {
+    const raw = window.localStorage.getItem(ACTION_CONFIG_STORAGE_KEY);
+    applyActionTextOverrides(raw ? JSON.parse(raw) : {});
+    setActionSettingsStatus(raw ? "已载入本机自定义含义。" : "使用当前默认配置。");
+    return true;
+  } catch {
+    resetActionConfigTextFromDefaults();
+    setActionSettingsStatus("本机自定义含义读取失败，已使用默认配置。", "error");
+    return false;
+  }
+}
+
+function updateActionTextValue(actionId, field, value) {
+  const action = getActionConfigById(actionId);
+  if (!action || !ACTION_TEXT_FIELDS.includes(field)) {
+    return;
+  }
+
+  action[field] = value;
+  updateActionGuide();
+  setActionSettingsStatus("有未保存修改。", "dirty");
+}
+
+function restoreActionTextDefault(actionId) {
+  const action = getActionConfigById(actionId);
+  const defaults = getDefaultActionConfigById(actionId);
+  if (!action || !defaults) {
+    return;
+  }
+
+  action.displayText = defaults.displayText;
+  action.speechText = defaults.speechText;
+  renderActionSettings();
+  updateActionGuide();
+  saveActionTextConfig({ silent: true });
+  setActionSettingsStatus(`${action.label} 已恢复默认并保存。`, "success");
+}
+
+function restoreAllActionTextDefaults() {
+  resetActionConfigTextFromDefaults();
+  renderActionSettings();
+  updateActionGuide();
+  saveActionTextConfig({ silent: true });
+  setActionSettingsStatus("全部动作含义已恢复默认并保存。", "success");
+  addLog("高级设置已恢复默认");
+}
+
+function renderActionSettings() {
+  if (!actionSettingsList) {
+    return;
+  }
+
+  actionSettingsList.innerHTML = "";
+  ACTION_CONFIG.forEach((action) => {
+    const row = document.createElement("div");
+    row.className = "action-settings-item";
+    row.dataset.actionId = action.id;
+
+    const header = document.createElement("div");
+    header.className = "action-settings-item-header";
+
+    const title = document.createElement("strong");
+    title.textContent = action.label;
+
+    const category = document.createElement("span");
+    category.textContent = action.category;
+
+    header.append(title, category);
+
+    const fields = document.createElement("div");
+    fields.className = "action-settings-fields";
+
+    ACTION_TEXT_FIELDS.forEach((field) => {
+      const label = document.createElement("label");
+      label.className = "action-settings-field";
+
+      const caption = document.createElement("span");
+      caption.textContent = field === "displayText" ? "屏幕显示" : "语音播报";
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = action[field] || "";
+      input.dataset.actionId = action.id;
+      input.dataset.field = field;
+      input.autocomplete = "off";
+      input.maxLength = 60;
+
+      label.append(caption, input);
+      fields.append(label);
+    });
+
+    const actions = document.createElement("div");
+    actions.className = "action-settings-item-actions";
+
+    const testButton = document.createElement("button");
+    testButton.className = "ghost-action compact-action";
+    testButton.type = "button";
+    testButton.dataset.actionId = action.id;
+    testButton.dataset.action = "test";
+    testButton.textContent = "测试播报";
+
+    const resetButton = document.createElement("button");
+    resetButton.className = "ghost-action compact-action";
+    resetButton.type = "button";
+    resetButton.dataset.actionId = action.id;
+    resetButton.dataset.action = "reset";
+    resetButton.textContent = "恢复默认";
+
+    actions.append(testButton, resetButton);
+    row.append(header, fields, actions);
+    actionSettingsList.append(row);
+  });
+}
+
+function exportActionTextConfig() {
+  const invalidAction = findInvalidActionText();
+  if (invalidAction) {
+    setActionSettingsStatus(`${invalidAction.label} 的显示文字和语音播报都不能为空。`, "error");
+    return;
+  }
+
+  const overrides = currentActionTextOverrides();
+  downloadTextFile(
+    `als-aac-action-config-${new Date().toISOString().replaceAll(":", "-")}.json`,
+    JSON.stringify(overrides, null, 2),
+    "application/json",
+  );
+  setActionSettingsStatus("已导出自定义含义。", "success");
+}
+
+async function importActionTextConfig(file) {
+  if (!file) {
+    return;
+  }
+
+  try {
+    const text = await file.text();
+    const payload = JSON.parse(text);
+    applyActionTextOverrides(payload);
+    const invalidAction = findInvalidActionText();
+    if (invalidAction) {
+      throw new Error(`${invalidAction.label} 的显示文字和语音播报都不能为空。`);
+    }
+    renderActionSettings();
+    updateActionGuide();
+    saveActionTextConfig({ silent: true });
+    setActionSettingsStatus("已导入并保存到本机。", "success");
+    addLog("高级设置已导入");
+  } catch (error) {
+    loadSavedActionTextConfig();
+    renderActionSettings();
+    updateActionGuide();
+    setActionSettingsStatus(error.message || "导入失败，请检查 JSON 文件。", "error");
+  } finally {
+    if (actionSettingsImportInput) {
+      actionSettingsImportInput.value = "";
+    }
+  }
 }
 
 function isActionGuideVisible(action) {
@@ -927,7 +1235,7 @@ function startActionConfirmation(action, label = action?.label || "") {
 
 function announceAction(action, label = action?.label || "") {
   const text = action.speechText || action.displayText;
-  announce(text, label, { shouldSpeak: action.speak });
+  announce(text, label, { shouldSpeak: true });
   if (action.flash) {
     triggerEmergencyFlash();
   }
@@ -980,7 +1288,7 @@ function cancelSpeech() {
 }
 
 function speak(text = state.lastPhrase) {
-  if (!ttsToggle.checked || !("speechSynthesis" in window) || !text || text === "等待输入") {
+  if (!("speechSynthesis" in window) || !text || text === "等待输入") {
     return;
   }
 
@@ -2126,7 +2434,7 @@ function handleSmileGesture(event, label) {
     label,
     detectedAt: performance.now(),
   };
-  setCommunicationMessage("微笑一次已记录；完全放松约半秒后再次微笑会表达“我爱你”。", "微笑 1/2");
+  setCommunicationMessage(`微笑一次已记录；完全放松约半秒后再次微笑会表达“${doubleSmileAction.displayText}”。`, "微笑 1/2");
   addLog("微笑 1/2：等待第二次明确微笑");
   state.gestureSequences.smileTimer = window.setTimeout(() => {
     const pending = state.gestureSequences.smilePending;
@@ -2177,20 +2485,21 @@ function handleGestureEvent(event, label) {
 
   if (event.name === "MOUTH_OPEN") {
     const now = performance.now();
+    const action = getActionConfigByGestureId(EVENT_GESTURE_IDS.MOUTH_DOUBLE_OPEN);
     state.gestureSequences.mouthOpenTimes = state.gestureSequences.mouthOpenTimes.filter(
       (time) => now - time <= MOUTH_DOUBLE_WINDOW_MS,
     );
     state.gestureSequences.mouthOpenTimes.push(now);
 
     if (state.gestureSequences.mouthOpenTimes.length < 2) {
-      setCommunicationMessage("张嘴一次已记录，请在 6 秒内再次微张嘴触发吸痰提示。", "张嘴 1/2");
+      const targetText = action?.displayText || "张嘴两次含义";
+      setCommunicationMessage(`张嘴一次已记录，请在 6 秒内再次微张嘴表达“${targetText}”。`, "张嘴 1/2");
       addLog(`${label} 1/2：${Math.round(event.duration)}ms，等待第二次张嘴`);
       finishPendingTestRecord({ note: "mouth_open_1_of_2" });
       return;
     }
 
     resetGestureSequences();
-    const action = getActionConfigByGestureId(EVENT_GESTURE_IDS.MOUTH_DOUBLE_OPEN);
     executeConfiguredAction(action, action?.label || "张嘴2次");
     return;
   }
@@ -3145,12 +3454,6 @@ clearSpeechButton.addEventListener("click", () => {
   setCommunicationMessage("等待输入", "--");
 });
 
-ttsToggle.addEventListener("change", () => {
-  if (!ttsToggle.checked) {
-    cancelSpeech();
-  }
-});
-
 blinkCodeToggle.addEventListener("change", () => {
   clearBlinkCodeBuffer();
   clearSeparatedLongBlink();
@@ -3163,6 +3466,69 @@ blinkCodeToggle.addEventListener("change", () => {
     updateActionGuide();
   });
 });
+
+actionSettingsList?.addEventListener("input", (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) {
+    return;
+  }
+
+  updateActionTextValue(input.dataset.actionId, input.dataset.field, input.value);
+});
+
+actionSettingsList?.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) {
+    return;
+  }
+
+  const button = event.target.closest("button[data-action]");
+  if (!button) {
+    return;
+  }
+
+  const action = getActionConfigById(button.dataset.actionId);
+  if (!action) {
+    return;
+  }
+
+  if (button.dataset.action === "reset") {
+    restoreActionTextDefault(action.id);
+    return;
+  }
+
+  if (button.dataset.action === "test") {
+    const text = normalizeActionText(action.speechText || action.displayText);
+    if (!text) {
+      setActionSettingsStatus(`${action.label} 的语音播报不能为空。`, "error");
+      return;
+    }
+    speak(text);
+    setActionSettingsStatus(`正在测试播报：${action.label}`, "success");
+  }
+});
+
+actionSettingsSaveButton?.addEventListener("click", () => {
+  saveActionTextConfig();
+});
+
+actionSettingsCancelButton?.addEventListener("click", () => {
+  loadSavedActionTextConfig();
+  renderActionSettings();
+  updateActionGuide();
+  setActionSettingsStatus("已取消未保存修改。");
+});
+
+actionSettingsExportButton?.addEventListener("click", exportActionTextConfig);
+
+actionSettingsImportButton?.addEventListener("click", () => {
+  actionSettingsImportInput?.click();
+});
+
+actionSettingsImportInput?.addEventListener("change", () => {
+  importActionTextConfig(actionSettingsImportInput.files?.[0]);
+});
+
+actionSettingsResetButton?.addEventListener("click", restoreAllActionTextDefaults);
 
 calibrationStartButton.addEventListener("click", startCalibrationGuide);
 
@@ -3232,6 +3598,8 @@ refreshCameraList().catch(() => {
   cameraSelect.append(option);
 });
 
+loadSavedActionTextConfig();
+renderActionSettings();
 updateActionGuide();
 updateRecordingUI();
 

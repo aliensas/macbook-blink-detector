@@ -168,7 +168,6 @@
               <label><input id="mouthToggle" type="checkbox" />张嘴两次吸痰</label>
               <label><input id="headShakeToggle" type="checkbox" />摇头 否/取消</label>
               <label><input id="smileToggle" type="checkbox" />微笑表达</label>
-              <label><input id="ttsToggle" type="checkbox" checked />语音</label>
             </div>
           </div>
 
@@ -179,6 +178,38 @@
             </div>
             <div class="action-guide-list" id="actionGuideList"></div>
           </div>
+
+          <details class="action-settings-panel" aria-label="高级设置">
+            <summary>
+              <span>高级设置</span>
+              <small>自定义动作含义</small>
+            </summary>
+            <div class="action-settings-body">
+              <p class="action-settings-note">只修改屏幕显示和语音播报文字；显示和播报始终开启。</p>
+              <div class="action-settings-list" id="actionSettingsList"></div>
+              <div class="action-settings-actions">
+                <button class="ghost-action compact-action" id="actionSettingsSaveButton" type="button">
+                  <i data-lucide="save"></i>
+                  <span>保存</span>
+                </button>
+                <button class="ghost-action compact-action" id="actionSettingsCancelButton" type="button">取消修改</button>
+                <button class="ghost-action compact-action" id="actionSettingsExportButton" type="button">
+                  <i data-lucide="download"></i>
+                  <span>导出</span>
+                </button>
+                <button class="ghost-action compact-action" id="actionSettingsImportButton" type="button">
+                  <i data-lucide="upload"></i>
+                  <span>导入</span>
+                </button>
+                <button class="ghost-action compact-action" id="actionSettingsResetButton" type="button">
+                  <i data-lucide="rotate-ccw"></i>
+                  <span>全部默认</span>
+                </button>
+              </div>
+              <input id="actionSettingsImportInput" type="file" accept="application/json,.json" hidden />
+              <p id="actionSettingsStatus" class="action-settings-status">使用当前默认配置。</p>
+            </div>
+          </details>
 
           <div class="calibration-panel" aria-label="引导校准">
             <div class="calibration-header">
