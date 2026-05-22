@@ -9,6 +9,10 @@
       name="description"
       content="ALS 面部微动作 AAC 输入原型，用摄像头识别低疲劳面部动作和眨眼短码。"
     />
+    <script>
+      document.documentElement.dataset.platform =
+        new URLSearchParams(window.location.search).get("platform") === "ios" ? "ios" : "mac";
+    </script>
     <link rel="icon" href="%BASE_URL%icons/icon.svg" type="image/svg+xml" />
     <title>ALS 面部微动作 AAC 输入原型</title>
   </head>

@@ -134,7 +134,11 @@ const APP_BASE_URL = new URL(import.meta.env.BASE_URL, window.location.href);
 const MODEL_URL = new URL("mediapipe/models/face_landmarker.task", APP_BASE_URL).toString();
 const WASM_URL = new URL("mediapipe/wasm", APP_BASE_URL).toString();
 const ENGINEERING_MODE = new URLSearchParams(window.location.search).has("debug");
+const PLATFORM_MODE = new URLSearchParams(window.location.search).get("platform") === "ios" ? "ios" : "mac";
 const LANGUAGE_STORAGE_KEY = "alsFacialAac.uiLanguage.v1";
+
+document.documentElement.dataset.platform = PLATFORM_MODE;
+document.body.classList.toggle("ios-mode", PLATFORM_MODE === "ios");
 
 const ENGLISH_VOICE_PRIORITY = [
   "Samantha",

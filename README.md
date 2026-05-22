@@ -13,6 +13,7 @@
 - `docs/v0.3-test-checklist.md`：当前 Mac 本地版动作测试清单。
 - `docs/desktop-distribution.md`：Mac 桌面应用打包、分发和验证说明。
 - `docs/ios/v0.2-ios-current-plan.md`：iPhone / iOS 版本基于当前 Mac 稳定版的迁移计划。
+- `docs/ios/v0.2-entry-layout.md`：iPhone 入口、布局模式和横竖屏验证方案。
 
 ## 当前定位
 

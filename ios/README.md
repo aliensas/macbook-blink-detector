@@ -10,3 +10,13 @@
 - 平台相关代码，如 iPhone 布局、iOS 摄像头权限、PWA 或 Xcode 打包，放在 `ios/` 路径中。
 
 当前阶段还没有生成 Xcode 工程。优先目标是让 iPhone Safari / PWA 跑通当前 Mac 稳定版的核心闭环。
+
+## 当前入口
+
+开发模式下访问：
+
+```text
+http://127.0.0.1:5173/ios/
+```
+
+该入口会进入同一套 Web 应用，并开启 `platform=ios` 布局模式。这样可以先验证 iPhone Safari / PWA，而不复制一份独立旧页面。
