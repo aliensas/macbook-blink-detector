@@ -26,6 +26,7 @@ const ctx = canvas.getContext("2d");
 const startButton = document.querySelector("#startButton");
 const stopButton = document.querySelector("#stopButton");
 const resetButton = document.querySelector("#resetButton");
+const languageToggleButton = document.querySelector("#languageToggleButton");
 const runtimeStatus = document.querySelector("#runtimeStatus");
 const videoEmpty = document.querySelector("#videoEmpty");
 const emergencyOverlay = document.querySelector("#emergencyOverlay");
@@ -115,6 +116,606 @@ const APP_BASE_URL = new URL(import.meta.env.BASE_URL, window.location.href);
 const MODEL_URL = new URL("mediapipe/models/face_landmarker.task", APP_BASE_URL).toString();
 const WASM_URL = new URL("mediapipe/wasm", APP_BASE_URL).toString();
 const ENGINEERING_MODE = new URLSearchParams(window.location.search).has("debug");
+const LANGUAGE_STORAGE_KEY = "alsFacialAac.uiLanguage.v1";
+
+const SUPPORTED_LANGUAGES = ["zh", "en"];
+
+function normalizeLanguage(value) {
+  return SUPPORTED_LANGUAGES.includes(value) ? value : "zh";
+}
+
+function readSavedLanguage() {
+  try {
+    return normalizeLanguage(window.localStorage.getItem(LANGUAGE_STORAGE_KEY));
+  } catch {
+    return "zh";
+  }
+}
+
+let currentLanguage = readSavedLanguage();
+
+const UI_TEXT = {
+  zh: {
+    langCode: "zh-CN",
+    speechLang: "zh-CN",
+    languageButton: "English",
+    appTitle: "ALS 面部微动作 AAC 输入原型",
+    appDescription: "ALS 面部微动作 AAC 输入原型，用摄像头识别低疲劳面部动作和眨眼短码。",
+    eyebrow: "Personalized Low-Fatigue AAC",
+    heading: "面部微动作 AAC 输入原型",
+    idleStatus: "待启动",
+    cameraPanelLabel: "摄像头预览",
+    waitingCamera: "等待摄像头",
+    startCamera: "启动",
+    stopCamera: "停止",
+    resetCounterTitle: "清零计数",
+    communicationOutput: "通信输出",
+    waitingInput: "等待输入",
+    repeatSpeech: "重播",
+    clearSpeech: "清空",
+    pauseRecognition: "暂停",
+    secondarySelection: "二级选择",
+    secondarySelectionHint: "两次短眨选择，长闭眼取消",
+    selectCurrent: "选择当前",
+    cancel: "取消",
+    blink: "眨眼",
+    state: "状态",
+    notDetected: "未检测",
+    eyeOpenness: "眼睛开合",
+    camera: "摄像头",
+    blinkThreshold: "眨眼阈值",
+    closedFrames: "闭眼帧数",
+    faceOverlay: "面部描边",
+    optionalGestures: "可选动作",
+    browMeter: "抬眉 是/确认",
+    mouthMeter: "张嘴两次 吸痰",
+    smileMeter: "微笑表达",
+    headMeter: "摇头取消",
+    input: "输入",
+    blinkAlwaysOn: "眨眼短码 始终开启",
+    browToggle: "抬眉 是/确认",
+    mouthToggle: "张嘴两次吸痰",
+    headToggle: "摇头 否/取消",
+    smileToggle: "微笑表达",
+    inputManagement: "输入管理",
+    actionGuide: "当前动作说明",
+    blinkOnly: "仅眨眼",
+    advancedSettings: "高级设置",
+    customActionMeaning: "自定义动作含义",
+    actionSettingsNote: "只输入一次表达文字；屏幕显示和语音播报使用同一句。",
+    save: "保存",
+    cancelChanges: "取消修改",
+    export: "导出",
+    import: "导入",
+    resetAllDefaults: "全部默认",
+    currentDefaults: "使用当前默认配置。",
+    calibration: "引导校准",
+    notStarted: "未开始",
+    calibrationReadyTitle: "准备画面",
+    calibrationReadyInstruction: "启动摄像头后，按提示采集睁眼、闭眼、短眨和长闭眼样本；核心校准完成后即可确认。",
+    start: "开始",
+    collect: "采集",
+    next: "下一步",
+    reset: "重置",
+    openEye: "睁眼",
+    closedEye: "闭眼",
+    threshold: "阈值",
+    shortBlink: "短眨",
+    longBlink: "长闭眼",
+    engineerTest: "工程测试",
+    testAndExport: "短码验证与记录导出",
+    guidedTestLabel: "短码测试项",
+    test: "测试",
+    engineerTestIdle: "工程测试未启动",
+    testRecords: "测试记录",
+    notRecording: "未记录",
+    entries: "条目",
+    accuracy: "正确率",
+    textLatency: "文字延迟",
+    expectedAction: "预期动作",
+    unspecified: "未指定",
+    startRecording: "开始记录",
+    correct: "正确",
+    wrong: "错误",
+    cameraNotStarted: "摄像头未启动",
+    copyLocalUrl: "复制地址",
+    guidedOptions: {
+      ".": "单次短眨：应忽略",
+      "-": "单次长闭眼：单独不播报",
+      "..": "两次短眨：校准后请求帮助",
+      "...": "三次短眨：校准后紧急求助",
+      "--": "两次长闭眼：校准后我想休息（6 秒内）",
+      ".-": "短眨+长闭眼：校准后挠痒痒",
+      "-.": "长闭眼+短眨：校准后调整体位",
+      "--.": "长闭眼+长闭眼+短眨：校准后输入管理",
+    },
+    expectedOptions: {
+      "": "未指定",
+      ".": "单次短眨",
+      "-": "单次长闭眼",
+      "..": "两次短眨",
+      "...": "三次短眨",
+      "--": "两次长闭眼（6 秒内）",
+      ".-": "短眨+长闭眼",
+      "-.": "长闭眼+短眨",
+      BROW_RAISE: "抬眉",
+      MOUTH_OPEN: "张嘴两次",
+      SMILE: "微笑",
+      SMILE_DOUBLE: "微笑两次",
+      HEAD_SHAKE: "摇头",
+    },
+  },
+  en: {
+    langCode: "en",
+    speechLang: "en-US",
+    languageButton: "Chinese",
+    appTitle: "ALS Facial Micro-Movement AAC Input Prototype",
+    appDescription: "An ALS facial micro-movement AAC input prototype that detects low-fatigue facial actions and blink codes with a camera.",
+    eyebrow: "Personalized Low-Fatigue AAC",
+    heading: "Facial Micro-Movement AAC Input",
+    idleStatus: "Idle",
+    cameraPanelLabel: "Camera preview",
+    waitingCamera: "Waiting for camera",
+    startCamera: "Start",
+    stopCamera: "Stop",
+    resetCounterTitle: "Reset counter",
+    communicationOutput: "Communication output",
+    waitingInput: "Waiting for input",
+    repeatSpeech: "Repeat",
+    clearSpeech: "Clear",
+    pauseRecognition: "Pause",
+    secondarySelection: "Secondary selection",
+    secondarySelectionHint: "Double short blink to select, long eye closure to cancel",
+    selectCurrent: "Select current",
+    cancel: "Cancel",
+    blink: "Blinks",
+    state: "State",
+    notDetected: "Not detected",
+    eyeOpenness: "Eye openness",
+    camera: "Camera",
+    blinkThreshold: "Blink threshold",
+    closedFrames: "Closed frames",
+    faceOverlay: "Face outline",
+    optionalGestures: "Optional gestures",
+    browMeter: "Eyebrow raise Yes/Confirm",
+    mouthMeter: "Open mouth twice Suction",
+    smileMeter: "Smile expression",
+    headMeter: "Head shake cancel",
+    input: "Input",
+    blinkAlwaysOn: "Blink code always on",
+    browToggle: "Eyebrow raise Yes/Confirm",
+    mouthToggle: "Open mouth twice for suction",
+    headToggle: "Head shake No/Cancel",
+    smileToggle: "Smile expression",
+    inputManagement: "Input management",
+    actionGuide: "Current action guide",
+    blinkOnly: "Blink only",
+    advancedSettings: "Advanced settings",
+    customActionMeaning: "Customize action meanings",
+    actionSettingsNote: "Enter the expression once; the same text is used for screen display and speech.",
+    save: "Save",
+    cancelChanges: "Cancel changes",
+    export: "Export",
+    import: "Import",
+    resetAllDefaults: "Reset all",
+    currentDefaults: "Using current defaults.",
+    calibration: "Guided calibration",
+    notStarted: "Not started",
+    calibrationReadyTitle: "Prepare camera view",
+    calibrationReadyInstruction: "After starting the camera, collect open-eye, closed-eye, short-blink, and long-closure samples. You can confirm after core calibration is complete.",
+    start: "Start",
+    collect: "Collect",
+    next: "Next",
+    reset: "Reset",
+    openEye: "Open eye",
+    closedEye: "Closed eye",
+    threshold: "Threshold",
+    shortBlink: "Short blink",
+    longBlink: "Long eye closure",
+    engineerTest: "Engineering test",
+    testAndExport: "Blink-code validation and record export",
+    guidedTestLabel: "Blink-code test item",
+    test: "Test",
+    engineerTestIdle: "Engineering test not started",
+    testRecords: "Test records",
+    notRecording: "Not recording",
+    entries: "Entries",
+    accuracy: "Accuracy",
+    textLatency: "Text latency",
+    expectedAction: "Expected action",
+    unspecified: "Unspecified",
+    startRecording: "Start recording",
+    correct: "Correct",
+    wrong: "Wrong",
+    cameraNotStarted: "Camera not started",
+    copyLocalUrl: "Copy URL",
+    guidedOptions: {
+      ".": "Single short blink: should be ignored",
+      "-": "Single long eye closure: no global speech",
+      "..": "Two short blinks: request help after calibration",
+      "...": "Three short blinks: emergency after calibration",
+      "--": "Two long eye closures: I want to rest after calibration (within 6s)",
+      ".-": "Short blink + long eye closure: scratch request after calibration",
+      "-.": "Long eye closure + short blink: position adjustment after calibration",
+      "--.": "Long + long + short blink: input management after calibration",
+    },
+    expectedOptions: {
+      "": "Unspecified",
+      ".": "Single short blink",
+      "-": "Single long eye closure",
+      "..": "Two short blinks",
+      "...": "Three short blinks",
+      "--": "Two long eye closures (within 6s)",
+      ".-": "Short blink + long eye closure",
+      "-.": "Long eye closure + short blink",
+      BROW_RAISE: "Eyebrow raise",
+      MOUTH_OPEN: "Open mouth twice",
+      SMILE: "Smile",
+      SMILE_DOUBLE: "Double smile",
+      HEAD_SHAKE: "Head shake",
+    },
+  },
+};
+
+function t(key, params = {}) {
+  const dictionary = UI_TEXT[currentLanguage] || UI_TEXT.zh;
+  const fallback = UI_TEXT.zh;
+  let value = dictionary[key] ?? fallback[key] ?? key;
+  Object.entries(params).forEach(([name, replacement]) => {
+    value = String(value).replaceAll(`{${name}}`, replacement);
+  });
+  return value;
+}
+
+const STATIC_TEXT_BINDINGS = [
+  [".camera-panel", "cameraPanelLabel", "aria-label"],
+  [".communication-panel", "communicationOutput", "aria-label"],
+  [".control-panel", "state", "aria-label"],
+  [".gesture-panel", "optionalGestures", "aria-label"],
+  [".action-guide", "actionGuide", "aria-label"],
+  [".action-settings-panel", "advancedSettings", "aria-label"],
+  [".calibration-panel", "calibration", "aria-label"],
+  [".engineer-panel", "engineerTest", "aria-label"],
+  [".recording-panel", "testRecords", "aria-label"],
+  [".eyebrow", "eyebrow"],
+  ["h1", "heading"],
+  ["#runtimeStatus span:last-child", "idleStatus"],
+  ["#videoEmpty span", "waitingCamera"],
+  ["#startButton span", "startCamera"],
+  ["#stopButton span", "stopCamera"],
+  ["#resetButton", "resetCounterTitle", "title"],
+  [".message-display .metric-label", "communicationOutput"],
+  ["#messageText", "waitingInput"],
+  ["#repeatSpeechButton span", "repeatSpeech"],
+  ["#repeatSpeechButton", "repeatSpeech", "title"],
+  ["#clearSpeechButton span", "clearSpeech"],
+  ["#clearSpeechButton", "clearSpeech", "title"],
+  ["#pauseRecognitionButton span", "pauseRecognition"],
+  ["#pauseRecognitionButton", "pauseRecognition", "title"],
+  ["#secondarySelectionTitle", "secondarySelection"],
+  ["#secondarySelectionHint", "secondarySelectionHint"],
+  ["#secondarySelectionSelectButton", "selectCurrent"],
+  ["#secondarySelectionCancelButton", "cancel"],
+  [".metric:nth-child(1) .metric-label", "blink"],
+  [".metric:nth-child(2) .metric-label", "state"],
+  ["#blinkState", "notDetected"],
+  [".signal-header span:first-child", "eyeOpenness"],
+  ['label[for="cameraSelect"]', "camera"],
+  ['label[for="thresholdRange"]', "blinkThreshold"],
+  ['label[for="holdFramesRange"]', "closedFrames"],
+  [".switch-row > span", "faceOverlay"],
+  [".gesture-header span:first-child", "optionalGestures"],
+  [".gesture-row:nth-child(1) span", "browMeter"],
+  [".gesture-row:nth-child(2) span", "mouthMeter"],
+  [".gesture-row:nth-child(3) span", "smileMeter"],
+  [".gesture-row:nth-child(4) span", "headMeter"],
+  ["#inputSectionLabel", "input"],
+  [".input-channel-fixed", "blinkAlwaysOn", "labelWithInput"],
+  ['label:has(#browToggle)', "browToggle", "labelWithInput"],
+  ['label:has(#mouthToggle)', "mouthToggle", "labelWithInput"],
+  ['label:has(#headShakeToggle)', "headToggle", "labelWithInput"],
+  ['label:has(#smileToggle)', "smileToggle", "labelWithInput"],
+  ["#inputManagementButton", "inputManagement"],
+  [".action-guide-header span:first-child", "actionGuide"],
+  ["#actionGuideMode", "blinkOnly"],
+  [".action-settings-panel summary span", "advancedSettings"],
+  [".action-settings-panel summary small", "customActionMeaning"],
+  [".action-settings-note", "actionSettingsNote"],
+  ["#actionSettingsSaveButton span", "save"],
+  ["#actionSettingsCancelButton", "cancelChanges"],
+  ["#actionSettingsExportButton span", "export"],
+  ["#actionSettingsImportButton span", "import"],
+  ["#actionSettingsResetButton span", "resetAllDefaults"],
+  ["#actionSettingsStatus", "currentDefaults"],
+  [".calibration-header span:first-child", "calibration"],
+  ["#calibrationStatus", "notStarted"],
+  ["#calibrationTitle", "calibrationReadyTitle"],
+  ["#calibrationInstruction", "calibrationReadyInstruction"],
+  ["#calibrationStartButton", "start"],
+  ["#calibrationCollectButton", "collect"],
+  ["#calibrationNextButton", "next"],
+  ["#calibrationResetButton", "reset"],
+  [".calibration-results span:nth-child(1)", "openEye", "prefixStrong"],
+  [".calibration-results span:nth-child(2)", "closedEye", "prefixStrong"],
+  [".calibration-results span:nth-child(3)", "threshold", "prefixStrong"],
+  [".calibration-results span:nth-child(4)", "shortBlink", "prefixStrong"],
+  [".calibration-results span:nth-child(5)", "longBlink", "prefixStrong"],
+  [".engineer-panel summary span", "engineerTest"],
+  [".engineer-panel summary small", "testAndExport"],
+  ["#guidedTestSelect", "guidedTestLabel", "aria-label"],
+  ["#guidedTestButton", "test"],
+  ["#guidedTestStatus", "engineerTestIdle"],
+  [".recording-header span:first-child", "testRecords"],
+  ["#recordingStatus", "notRecording"],
+  [".recording-metrics span:nth-child(1)", "entries", "prefixStrong"],
+  [".recording-metrics span:nth-child(2)", "accuracy", "prefixStrong"],
+  [".recording-metrics span:nth-child(3)", "textLatency", "prefixStrong"],
+  ['label[for="recordingExpectedSelect"]', "expectedAction"],
+  ["#recordingStartButton span", "startRecording"],
+  ["#recordingStopButton span", "stopCamera"],
+  ["#recordingMarkCorrectButton", "correct"],
+  ["#recordingMarkWrongButton", "wrong"],
+  ["#diagnosticTitle", "cameraNotStarted"],
+  ["#copyUrlButton span", "copyLocalUrl"],
+  ["#copyUrlButton", "copyLocalUrl", "title"],
+];
+
+const RUNTIME_TEXT_EN = {
+  "--": "--",
+  "待启动": "Idle",
+  "等待输入": "Waiting for input",
+  "未检测": "Not detected",
+  "检测中": "Detecting",
+  "记录中": "Recording",
+  "已启动": "Started",
+  "已停止": "Stopped",
+  "已断开": "Disconnected",
+  "暂停": "Paused",
+  "继续": "Resume",
+  "休息": "Rest",
+  "校准完成": "Calibration complete",
+  "校准已载入": "Calibration loaded",
+  "已取消": "Canceled",
+  "确认": "Confirm",
+  "未确认": "Not confirmed",
+  "短码": "Blink code",
+  "二级选择": "Secondary selection",
+  "输入管理": "Input management",
+  "挠痒痒": "Scratch request",
+  "调整体位": "Position adjustment",
+  "闭合": "Closed",
+  "睁开": "Open",
+  "闭眼": "Eyes closed",
+  "眨眼": "Blink",
+  "睁眼": "Eyes open",
+  "未见人脸": "No face visible",
+  "关键点不足": "Not enough landmarks",
+  "画面稳定中": "Stabilizing view",
+  "点头中，抬眉暂停": "Nodding detected, eyebrow paused",
+  "摇头中，微笑暂停": "Head motion detected, smile paused",
+  "输入管理中忽略摇头": "Head shake ignored in input management",
+  "抬眉": "Eyebrow raise",
+  "张嘴": "Mouth open",
+  "微笑": "Smile",
+  "摇头": "Head shake",
+  "短眨选择": "short-blink selection",
+  "手动点击": "manual click",
+  "手动取消": "manual cancel",
+  "加载模型": "Loading model",
+  "请求权限": "Requesting permission",
+  "浏览器不支持": "Browser unsupported",
+  "需要安全连接": "Secure connection needed",
+  "摄像头失败": "Camera failed",
+  "启动失败": "Start failed",
+  "模型失败": "Model failed",
+  "摄像头断开": "Camera disconnected",
+  "检测失败": "Detection failed",
+  "识别已暂停": "Recognition paused",
+  "识别已恢复": "Recognition resumed",
+  "检测已停止": "Detection stopped",
+  "本地地址已复制": "Local URL copied",
+  "已取消未保存修改。": "Canceled unsaved changes.",
+  "测试记录已开始": "Test recording started",
+  "高级设置已保存到本机": "Advanced settings saved on this device",
+  "高级设置已恢复默认": "Advanced settings restored to defaults",
+  "高级设置已导入": "Advanced settings imported",
+  "输入通道设置已保存": "Input channel settings saved",
+  "输入通道设置保存失败": "Input channel settings save failed",
+  "输入通道设置读取失败，已切换为仅眨眼": "Could not load input channel settings. Switched to blink-only input.",
+  "识别已暂停，点击继续后恢复": "Recognition paused. Click Resume to continue.",
+  "摄像头列表更新失败": "Camera list refresh failed",
+  "使用当前默认配置。": "Using current defaults.",
+  "已保存到本机。": "Saved on this device.",
+  "保存失败，请检查浏览器本地存储权限。": "Save failed. Please check browser local storage permissions.",
+  "已载入本机自定义含义。": "Loaded custom meanings from this device.",
+  "本机自定义含义读取失败，已使用默认配置。": "Could not load custom meanings. Defaults are in use.",
+  "有未保存修改。": "Unsaved changes.",
+  "全部动作含义已恢复默认并保存。": "All action meanings restored to defaults and saved.",
+  "已导出自定义含义。": "Custom meanings exported.",
+  "已导入并保存到本机。": "Imported and saved on this device.",
+  "导入失败，请检查 JSON 文件。": "Import failed. Please check the JSON file.",
+  "当前未启用动作输入。": "No action input is currently enabled.",
+  "二级选择已取消": "Secondary selection canceled",
+  "二级选择中收到紧急求助短码，已退出二级选择": "Emergency blink code received during secondary selection. Secondary selection exited.",
+  "二级选择：忽略单次短眨": "Secondary selection: single short blink ignored",
+  "二级选择中忽略张嘴动作": "Mouth-open action ignored during secondary selection",
+  "二级选择中忽略微笑动作": "Smile action ignored during secondary selection",
+  "输入管理中忽略摇头动作，避免刚开启摇头时误退出": "Head shake ignored in input management to avoid accidental exit just after enabling it",
+  "已退出输入管理": "Exited input management",
+  "已切换为仅用眨眼": "Switched to blink-only input",
+  "抬眉识别已开启": "Eyebrow raise detection enabled",
+  "抬眉识别已关闭": "Eyebrow raise detection disabled",
+  "张嘴识别已开启": "Mouth-open detection enabled",
+  "张嘴识别已关闭": "Mouth-open detection disabled",
+  "微笑识别已开启": "Smile detection enabled",
+  "微笑识别已关闭": "Smile detection disabled",
+  "摇头识别已开启": "Head-shake detection enabled",
+  "摇头识别已关闭": "Head-shake detection disabled",
+  "输入管理：请选择要开启或关闭的动作。眨眼短码始终开启。": "Input management: choose which optional actions to enable or disable. Blink code is always on.",
+  "单次短眨已忽略；两次短眨选择当前项，长闭眼取消。": "Single short blink ignored. Double short blink selects the current item; long eye closure cancels.",
+  "二级选择中：请用两次短眨或抬眉选择，长闭眼或摇头取消。": "Secondary selection: use two short blinks or eyebrow raise to select; long eye closure or head shake cancels.",
+  "确认超时，已取消": "Confirmation timed out and was canceled",
+  "短码过长，已忽略": "Blink code too long, ignored",
+  "校准已确认，可以开始通信输入。": "Calibration confirmed. Communication input is ready.",
+  "已载入校准档案，可以开始通信输入。": "Calibration profile loaded. Communication input is ready.",
+  "校准已重置。点击“开始校准”后按提示采集。": "Calibration reset. Click Start calibration and follow the prompts.",
+  "核心校准已完成，可直接点“完成确认”。短码测试是可选验证。": "Core calibration is complete. You can confirm now; blink-code testing is optional.",
+  "请先启动摄像头": "Please start the camera first",
+  "请先启动摄像头，再采集校准样本。": "Please start the camera before collecting calibration samples.",
+  "请先启动摄像头再测试短码": "Please start the camera before testing blink codes",
+  "请先完成前面校准步骤，并进入“测试短码”。": "Please complete the earlier calibration steps and enter Blink-code testing.",
+  "请先完成睁眼、闭眼、短眨和长闭眼样本采集。": "Please complete open-eye, closed-eye, short-blink, and long-closure samples.",
+  "全部短码测试已通过，可以点击“完成确认”。": "All blink-code tests passed. You can click Confirm.",
+  "已收到第一次长闭眼，请继续做第二次长闭眼，再在约 1.6 秒内短眨。": "First long eye closure received. Do the second long closure, then short blink within about 1.6 seconds.",
+  "已收到第一次长闭眼，请在 6 秒内再做一次长闭眼。": "First long eye closure received. Do another long closure within 6 seconds.",
+  "已收到一次长闭眼；6 秒内再做一次会表达“我想休息”。": "One long eye closure received; doing another within 6 seconds will express “I want to rest.”",
+  "输入管理短码已识别；完成并确认引导校准后才打开菜单。": "Input-management blink code recognized. The menu opens only after guided calibration is confirmed.",
+  "单次短眨已忽略，请连续两次短眨确认，长闭眼取消。": "Single short blink ignored. Use two short blinks to confirm, or long eye closure to cancel.",
+  "确认未识别：请连续两次短眨确认，长闭眼取消。": "Confirmation not recognized. Use two short blinks to confirm, or long eye closure to cancel.",
+  "摄像头正在启动": "Camera is starting",
+  "采集中，暂不能进入下一步": "Collecting; cannot move to the next step yet",
+  "短码测试等待输入中，暂不能完成确认": "Blink-code test is waiting for input; cannot confirm yet",
+  "当前校准步骤尚未完成": "Current calibration step is not complete",
+  "核心校准未完成，暂不能测试短码": "Core calibration is incomplete; blink-code testing is not available yet",
+  "尚未进入短码测试步骤": "Blink-code test step has not started yet",
+  "引导校准已开始": "Guided calibration started",
+  "引导校准已确认完成": "Guided calibration confirmed",
+  "引导校准已重置，本地校准档案已清除": "Guided calibration reset; local calibration profile cleared",
+  "本地校准档案读取失败，已忽略": "Could not read local calibration profile; ignored",
+  "本地校准档案清除失败": "Could not clear local calibration profile",
+  "校准档案已保存，本机下次会自动沿用": "Calibration profile saved; this device will reuse it next time",
+  "校准档案保存失败，请检查浏览器本地存储权限": "Calibration profile save failed. Please check browser local storage permissions.",
+  "已载入本机保存的校准档案": "Loaded calibration profile saved on this device",
+  "差异不足": "Insufficient difference",
+  "睁眼/闭眼 EAR 差异不足，未更新阈值": "Open/closed-eye EAR difference is insufficient; threshold not updated",
+  "当前浏览器不支持摄像头": "This browser does not support camera access",
+  "当前浏览器无法访问摄像头": "This browser cannot access the camera",
+  "摄像头需要 HTTPS 或本机安全环境": "Camera access requires HTTPS or a local secure context",
+  "摄像头需要安全连接": "Camera requires a secure connection",
+  "人脸模型加载失败": "Face model failed to load",
+  "摄像头权限被拒绝": "Camera permission denied",
+  "没有找到可用摄像头": "No available camera found",
+  "摄像头被占用": "Camera is in use",
+  "指定摄像头不可用": "Selected camera unavailable",
+  "指定摄像头不可用，已准备切回默认摄像头": "Selected camera unavailable; ready to switch back to the default camera",
+  "指定摄像头不可用，切回系统默认摄像头": "Selected camera unavailable; switching to the system default camera",
+  "摄像头启动失败": "Camera start failed",
+  "检测循环出现错误": "Detection loop error",
+  "检测循环出现错误，已暂停": "Detection loop error, paused",
+  "摄像头已断开": "Camera disconnected",
+  "摄像头列表已更新": "Camera list refreshed",
+};
+
+function localizeRuntimeText(text) {
+  if (currentLanguage === "zh" || text === null || text === undefined) {
+    return text ?? "";
+  }
+
+  const source = String(text);
+  if (RUNTIME_TEXT_EN[source]) {
+    return RUNTIME_TEXT_EN[source];
+  }
+
+  return source
+    .replace(/^已启用 (\d+) 类可选输入$/, "$1 optional input type(s) enabled")
+    .replace(/^(\S+) 的表达文字不能为空。$/, "$1 expression text cannot be empty.")
+    .replace(/^(\S+) 已恢复默认并保存。$/, "$1 restored to default and saved.")
+    .replace(/^正在测试播报：(.+)$/, "Testing speech: $1")
+    .replace(/^已载入同一患者本地校准档案（(.+)）。更换患者或状态变化时请重置。$/, "Loaded this patient’s local calibration profile ($1). Reset if the patient or condition changes.")
+    .replace(/^等待输入：(.+)$/, "Waiting for input: $1")
+    .replace(/^通过：收到 (.+)。可点“完成确认”，也可继续测试 (.+)。进度 (.+)。$/, "Passed: received $1. You can confirm now or continue testing $2. Progress $3.")
+    .replace(/^不匹配：期望 (.+)，收到 (.+)。请重新点“测试”。$/, "Mismatch: expected $1, received $2. Click Test again.")
+    .replace(/^短码 (.+) 已识别；完成并确认引导校准后才播报短语。$/, "Blink code $1 recognized. Phrases are spoken only after guided calibration is confirmed.")
+    .replace(/^未识别编码：(.+)$/, "Unrecognized code: $1")
+    .replace(/^张嘴一次已记录，请在 6 秒内再次微张嘴表达“(.+)”。$/, "One mouth-open action recorded. Open the mouth slightly again within 6 seconds to express “$1.”")
+    .replace(/^微笑一次已记录；完全放松约半秒后再次微笑会表达“(.+)”。$/, "One smile recorded. Relax fully for about half a second, then smile again to express “$1.”")
+    .replace(/^检测到(.+)；完成并确认引导校准后才启用动作映射。$/, "$1 detected. Action mapping is enabled only after guided calibration is confirmed.")
+    .replace(/^短码测试中，(.+)动作已记录但不执行。$/, "$1 recorded during blink-code testing but not executed.")
+    .replace(/^(.+)超时，已取消$/, "$1 timed out and was canceled");
+}
+
+function setElementText(selector, key, mode = "text") {
+  let element = null;
+  try {
+    element = document.querySelector(selector);
+  } catch {
+    return;
+  }
+  if (!element) {
+    return;
+  }
+
+  const value = t(key);
+  if (mode === "title" || mode === "aria-label") {
+    element.setAttribute(mode, value);
+    return;
+  }
+
+  if (mode === "labelWithInput") {
+    const input = element.querySelector("input");
+    element.textContent = "";
+    if (input) {
+      element.append(input);
+    }
+    element.append(document.createTextNode(value));
+    return;
+  }
+
+  if (mode === "prefixStrong") {
+    const strong = element.querySelector("strong");
+    element.textContent = `${value} `;
+    if (strong) {
+      element.append(strong);
+    }
+    return;
+  }
+
+  element.textContent = value;
+}
+
+function localizeCameraOptionLabels() {
+  let genericCameraIndex = 1;
+  Array.from(cameraSelect.options).forEach((option) => {
+    if (!option.value && /授权后显示摄像头名称|Camera names appear after permission|等待权限|Waiting for permission/.test(option.textContent)) {
+      option.textContent = currentLanguage === "en" ? "Camera names appear after permission" : "授权后显示摄像头名称";
+      return;
+    }
+
+    if (/^摄像头 \d+$|^Camera \d+$/.test(option.textContent)) {
+      option.textContent = currentLanguage === "en" ? `Camera ${genericCameraIndex}` : `摄像头 ${genericCameraIndex}`;
+      genericCameraIndex += 1;
+    }
+  });
+}
+
+function findSelectOptionByValue(select, value) {
+  return Array.from(select.options).find((option) => option.value === value) || null;
+}
+
+function applyStaticLanguage() {
+  document.documentElement.lang = t("langCode");
+  document.title = t("appTitle");
+  document.querySelector('meta[name="description"]')?.setAttribute("content", t("appDescription"));
+  languageToggleButton.querySelector("span").textContent = t("languageButton");
+
+  STATIC_TEXT_BINDINGS.forEach(([selector, key, mode]) => setElementText(selector, key, mode));
+
+  Object.entries(UI_TEXT[currentLanguage].guidedOptions).forEach(([value, label]) => {
+    const option = findSelectOptionByValue(guidedTestSelect, value);
+    if (option) {
+      option.textContent = label;
+    }
+  });
+
+  Object.entries(UI_TEXT[currentLanguage].expectedOptions).forEach(([value, label]) => {
+    const option = findSelectOptionByValue(recordingExpectedSelect, value);
+    if (option) {
+      option.textContent = label;
+    }
+  });
+
+  localizeCameraOptionLabels();
+}
 
 document.documentElement.classList.toggle("engineering-mode", ENGINEERING_MODE);
 if (engineerPanel) {
@@ -306,7 +907,89 @@ const DEFAULT_ACTION_CONFIG = [
   },
 ];
 
-const ACTION_CONFIG = DEFAULT_ACTION_CONFIG.map((action) => ({ ...action }));
+const ACTION_LOCALIZATION = {
+  en: {
+    blink_double_short_help: {
+      label: "2 short blinks",
+      displayText: "Please help me, come here.",
+      speechText: "Please help me, come here.",
+      instruction: "Blink twice in a row. Each blink should close the eyes for 0.1-0.5 seconds, with a clear reopening.",
+      category: "help",
+    },
+    blink_triple_short_emergency: {
+      label: "3 short blinks",
+      displayText: "Emergency, please check now.",
+      speechText: "Emergency, please check now.",
+      instruction: "Blink three times in a row. Reopen the eyes clearly after each blink.",
+      category: "emergency",
+    },
+    blink_double_long_rest: {
+      label: "2 long eye closures",
+      displayText: "I want to rest.",
+      speechText: "I want to rest.",
+      instruction: "Close the eyes for about 1 second each time. Valid range is 0.7-2.8 seconds, then reopen. Do this twice within 6 seconds.",
+      category: "control",
+    },
+    blink_short_long_scratch: {
+      label: "Short blink + long closure",
+      displayText: "I feel itchy.",
+      speechText: "I feel itchy.",
+      instruction: "Short blink and reopen; within 2.5 seconds, start a long eye closure of about 1 second. Then choose the itchy area.",
+      category: "care",
+    },
+    blink_long_short_position: {
+      label: "Long closure + short blink",
+      displayText: "I want to adjust my position.",
+      speechText: "I want to adjust my position.",
+      instruction: "Close the eyes for about 1 second and reopen; then do one short blink. Then choose the adjustment.",
+      category: "care",
+    },
+    brow_raise_yes: {
+      label: "Eyebrow raise",
+      displayText: "Yes, confirm.",
+      speechText: "Yes, confirm.",
+      instruction: "Keep the head as stable as possible. Raise the eyebrows lightly for about 0.25 seconds, then relax. Nodding temporarily pauses eyebrow detection.",
+      category: "control",
+    },
+    mouth_double_open_suction: {
+      label: "Open mouth twice",
+      displayText: "I need suctioning, please check now.",
+      speechText: "I need suctioning, please check now.",
+      instruction: "Open the mouth slightly for about 0.2 seconds, then close. Repeat twice within 6 seconds.",
+      category: "care",
+    },
+    smile_status: {
+      label: "Smile",
+      displayText: "Thank you. OK. I am alright.",
+      speechText: "Thank you. OK. I am alright.",
+      instruction: "Smile gently with the mouth closed for about 0.25 seconds, then relax. Clear mouth opening or side-to-side head motion temporarily pauses smile detection.",
+      category: "emotion",
+    },
+    smile_double_love: {
+      label: "Double smile",
+      displayText: "I love you.",
+      speechText: "I love you.",
+      instruction: "Smile with the mouth closed, fully relax for about 0.5 seconds, then smile again.",
+      category: "emotion",
+    },
+    head_shake_no: {
+      label: "Head shake",
+      displayText: "No. Not that. Cancel.",
+      speechText: "No. Not that. Cancel.",
+      instruction: "Use a very small left-right-left or right-left-right head shake within 4 seconds. No large movement is needed.",
+      category: "control",
+    },
+  },
+};
+
+function localizedActionDefault(action, lang = currentLanguage) {
+  return {
+    ...action,
+    ...(ACTION_LOCALIZATION[lang]?.[action.id] || {}),
+  };
+}
+
+const ACTION_CONFIG = DEFAULT_ACTION_CONFIG.map((action) => ({ ...localizedActionDefault(action) }));
 const BLINK_CODE_GESTURE_IDS = {
   "..": "blink_double_short",
   "...": "blink_triple_short",
@@ -373,6 +1056,76 @@ const SECONDARY_SELECTION_GROUPS = {
     ],
   },
 };
+const SECONDARY_SELECTION_LOCALIZATION = {
+  en: {
+    scratch: {
+      label: "Scratch",
+      title: "I feel itchy: choose the area",
+      promptSuffix: "please choose the area",
+      hint: "The highlight moves automatically. Use two short blinks or a light eyebrow raise to select; long eye closure or head shake cancels.",
+      options: {
+        scratch_head: { label: "Head", text: "Please scratch my head." },
+        scratch_face: { label: "Face / ear", text: "Please scratch my face or near my ear." },
+        scratch_back: { label: "Back", text: "Please scratch my back." },
+        scratch_arm: { label: "Arm", text: "Please scratch my arm." },
+        scratch_leg: { label: "Leg", text: "Please scratch my leg." },
+        scratch_check: { label: "Please check", text: "Please check where I feel itchy." },
+      },
+    },
+    position: {
+      label: "Position",
+      title: "I want to adjust my position: choose the adjustment",
+      promptSuffix: "please choose the adjustment",
+      hint: "The highlight moves automatically. Use two short blinks or a light eyebrow raise to select; long eye closure or head shake cancels.",
+      options: {
+        position_left: { label: "Turn left", text: "Please help me turn to my left side." },
+        position_right: { label: "Turn right", text: "Please help me turn to my right side." },
+        position_raise: { label: "Raise upper body", text: "Please raise my head and upper body a little." },
+        position_lower: { label: "Lower upper body", text: "Please lower my head and upper body a little." },
+        position_pillow: { label: "Adjust pillow", text: "Please adjust my pillow." },
+        position_legs: { label: "Adjust legs", text: "Please adjust my legs or feet." },
+      },
+    },
+    inputChannels: {
+      label: "Input management",
+      title: "Input management: choose recognition channels",
+      hint: "The highlight moves automatically. Use two short blinks or eyebrow raise to select; long eye closure exits. Blink code is always on.",
+      options: {
+        blink_only: { label: "Blink only" },
+        toggle_brow: { label: "Eyebrow", onText: "Eyebrow raise detection enabled", offText: "Eyebrow raise detection disabled" },
+        toggle_mouth: { label: "Mouth", onText: "Mouth-open detection enabled", offText: "Mouth-open detection disabled" },
+        toggle_smile: { label: "Smile", onText: "Smile detection enabled", offText: "Smile detection disabled" },
+        toggle_head: { label: "Head shake", onText: "Head-shake detection enabled", offText: "Head-shake detection disabled" },
+        exit: { label: "Exit" },
+      },
+    },
+  },
+};
+
+const SECONDARY_SELECTION_BASE = structuredClone(SECONDARY_SELECTION_GROUPS);
+
+function applySecondarySelectionLanguage() {
+  Object.entries(SECONDARY_SELECTION_BASE).forEach(([groupId, baseGroup]) => {
+    const localized = SECONDARY_SELECTION_LOCALIZATION[currentLanguage]?.[groupId] || {};
+    const group = SECONDARY_SELECTION_GROUPS[groupId];
+    Object.assign(group, {
+      label: localized.label || baseGroup.label,
+      title: localized.title || baseGroup.title,
+      promptSuffix: localized.promptSuffix || baseGroup.promptSuffix,
+      hint: localized.hint || baseGroup.hint,
+    });
+
+    group.options.forEach((option, index) => {
+      const baseOption = baseGroup.options[index];
+      const localizedOption = localized.options?.[baseOption.id] || {};
+      ["label", "text", "onText", "offText"].forEach((field) => {
+        if (baseOption[field] || localizedOption[field]) {
+          option[field] = localizedOption[field] || baseOption[field];
+        }
+      });
+    });
+  });
+}
 const OPTIONAL_INPUT_CHANNELS = {
   brow: { toggle: browToggle, label: "抬眉" },
   mouth: { toggle: mouthToggle, label: "张嘴" },
@@ -406,6 +1159,10 @@ const CALIBRATION_STORAGE_KEY = "alsFacialAac.defaultPatientCalibration.v1";
 const ACTION_TEXT_STORAGE_KEY = "alsFacialAac.actionText.v1";
 const INPUT_CHANNEL_STORAGE_KEY = "alsFacialAac.inputChannels.v1";
 const LEGACY_ACTION_CONFIG_STORAGE_KEYS = ["alsFacialAac.actionConfig.v2"];
+
+function actionTextStorageKey(lang = currentLanguage) {
+  return lang === "zh" ? ACTION_TEXT_STORAGE_KEY : `${ACTION_TEXT_STORAGE_KEY}.${lang}`;
+}
 const CALIBRATION_STEPS = [
   {
     id: "position",
@@ -452,6 +1209,44 @@ const CALIBRATION_STEPS = [
     kind: "test",
   },
 ];
+const CALIBRATION_STEP_LOCALIZATION = {
+  en: {
+    position: {
+      title: "Prepare camera view",
+      instruction: "Confirm the full face is visible, facial outlines match, and lighting is stable. Then continue.",
+    },
+    open: {
+      title: "1. Natural open-eye baseline",
+      instruction: "Keep the eyes naturally open. Click Collect and the system will collect a 2-second EAR baseline.",
+    },
+    closed: {
+      title: "2. Gentle closed-eye baseline",
+      instruction: "Gently close the eyes. Click Collect and the system will collect a 1.5-second closed-eye EAR baseline and update the blink threshold.",
+    },
+    short: {
+      title: "3. Intentional short-blink samples",
+      instruction: "After clicking Collect, do 3 low-fatigue short blinks, about 1 second apart.",
+    },
+    long: {
+      title: "4. Long eye-closure sample",
+      instruction: "After clicking Collect, do 1 controlled long eye closure. Do not strain.",
+    },
+    review: {
+      title: "5. Confirm calibration",
+      instruction: "After core calibration is complete, click Confirm. The blink-code tests below are optional checks for accuracy and false triggers.",
+    },
+  },
+};
+const CALIBRATION_STEPS_BASE = structuredClone(CALIBRATION_STEPS);
+
+function applyCalibrationLanguage() {
+  CALIBRATION_STEPS.forEach((step, index) => {
+    const base = CALIBRATION_STEPS_BASE[index];
+    const localized = CALIBRATION_STEP_LOCALIZATION[currentLanguage]?.[base.id] || {};
+    step.title = localized.title || base.title;
+    step.instruction = localized.instruction || base.instruction;
+  });
+}
 const GUIDED_TEST_CODES = [".", "-", "..", "...", "--", ".-", "-.", "--."];
 
 const state = {
@@ -546,7 +1341,7 @@ const state = {
 };
 
 function setStatus(label, mode = "idle") {
-  runtimeStatus.innerHTML = `<span class="dot dot-${mode}"></span><span>${label}</span>`;
+  runtimeStatus.innerHTML = `<span class="dot dot-${mode}"></span><span>${localizeRuntimeText(label)}</span>`;
 }
 
 function isPausedStateActive() {
@@ -554,9 +1349,10 @@ function isPausedStateActive() {
 }
 
 function addLog(message) {
+  const displayMessage = localizeRuntimeText(message);
   state.sessionEvents.push({
     time: new Date().toISOString(),
-    message,
+    message: displayMessage,
     mode: state.pendingConfirmation
       ? "confirm"
       : state.secondarySelection.active
@@ -572,12 +1368,12 @@ function addLog(message) {
 
   const item = document.createElement("div");
   item.className = "event";
-  item.textContent = `${new Date().toLocaleTimeString("zh-CN", {
+  item.textContent = `${new Date().toLocaleTimeString(t("langCode"), {
     hour12: false,
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
-  })}  ${message}`;
+  })}  ${displayMessage}`;
   eventLog.prepend(item);
 
   while (eventLog.children.length > 5) {
@@ -620,7 +1416,11 @@ function updateRecordingUI() {
   const correct = marked.filter((record) => record.correct).length;
   const averageDisplayLatency = averageRecorded(records, "displayLatencyFromActionEndMs");
 
-  recordingStatus.textContent = state.recording.active ? "记录中" : records.length > 0 ? "已停止" : "未记录";
+  recordingStatus.textContent = state.recording.active
+    ? localizeRuntimeText("记录中")
+    : records.length > 0
+      ? localizeRuntimeText("已停止")
+      : t("notRecording");
   recordingCount.textContent = records.length.toString();
   recordingAccuracy.textContent = marked.length > 0 ? `${Math.round((correct / marked.length) * 100)}%` : "--";
   recordingLatency.textContent =
@@ -876,8 +1676,8 @@ function hideDiagnostic() {
 }
 
 function showDiagnostic(title, message) {
-  diagnosticTitle.textContent = title;
-  diagnosticMessage.textContent = message;
+  diagnosticTitle.textContent = localizeRuntimeText(title);
+  diagnosticMessage.textContent = localizeRuntimeText(message);
   diagnosticPanel.classList.remove("hidden");
 }
 
@@ -896,7 +1696,7 @@ function resetDetectionWindow() {
 }
 
 function resetLiveMetrics(status = "未检测") {
-  blinkState.textContent = status;
+  blinkState.textContent = localizeRuntimeText(status);
   earValue.textContent = "--";
   fpsValue.textContent = "--";
   confidenceLabel.textContent = "--";
@@ -948,7 +1748,8 @@ function clamp(value, min, max) {
 }
 
 function getDefaultActionConfigById(id) {
-  return DEFAULT_ACTION_CONFIG.find((action) => action.id === id) || null;
+  const base = DEFAULT_ACTION_CONFIG.find((action) => action.id === id);
+  return base ? localizedActionDefault(base) : null;
 }
 
 function getActionConfigById(id) {
@@ -981,6 +1782,21 @@ function resetActionConfigTextFromDefaults() {
     }
 
     setActionText(action, getActionText(defaults));
+  });
+}
+
+function applyActionConfigLanguage() {
+  ACTION_CONFIG.forEach((action) => {
+    const defaults = getDefaultActionConfigById(action.id);
+    if (!defaults) {
+      return;
+    }
+
+    action.label = defaults.label;
+    action.instruction = defaults.instruction;
+    action.category = defaults.category;
+    action.displayText = defaults.displayText;
+    action.speechText = defaults.speechText;
   });
 }
 
@@ -1048,7 +1864,7 @@ function setActionSettingsStatus(text, tone = "idle") {
     return;
   }
 
-  actionSettingsStatus.textContent = text;
+  actionSettingsStatus.textContent = localizeRuntimeText(text);
   actionSettingsStatus.dataset.tone = tone;
 }
 
@@ -1062,9 +1878,9 @@ function saveActionTextConfig({ silent = false } = {}) {
   const overrides = currentActionTextOverrides();
   try {
     if (Object.keys(overrides).length === 0) {
-      window.localStorage.removeItem(ACTION_TEXT_STORAGE_KEY);
+      window.localStorage.removeItem(actionTextStorageKey());
     } else {
-      window.localStorage.setItem(ACTION_TEXT_STORAGE_KEY, JSON.stringify(overrides, null, 2));
+      window.localStorage.setItem(actionTextStorageKey(), JSON.stringify(overrides, null, 2));
     }
     LEGACY_ACTION_CONFIG_STORAGE_KEYS.forEach((key) => window.localStorage.removeItem(key));
 
@@ -1081,7 +1897,8 @@ function saveActionTextConfig({ silent = false } = {}) {
 
 function loadSavedActionTextConfig() {
   try {
-    const raw = window.localStorage.getItem(ACTION_TEXT_STORAGE_KEY);
+    applyActionConfigLanguage();
+    const raw = window.localStorage.getItem(actionTextStorageKey());
     applyActionTextOverrides(raw ? JSON.parse(raw) : {});
     LEGACY_ACTION_CONFIG_STORAGE_KEYS.forEach((key) => window.localStorage.removeItem(key));
     setActionSettingsStatus(raw ? "已载入本机自定义含义。" : "使用当前默认配置。");
@@ -1156,7 +1973,7 @@ function renderActionSettings() {
     fieldLabel.className = "action-settings-field";
 
     const caption = document.createElement("span");
-    caption.textContent = "表达文字";
+    caption.textContent = currentLanguage === "en" ? "Expression text" : "表达文字";
 
     const input = document.createElement("input");
     input.type = "text";
@@ -1176,14 +1993,14 @@ function renderActionSettings() {
     testButton.type = "button";
     testButton.dataset.actionId = action.id;
     testButton.dataset.action = "test";
-    testButton.textContent = "测试播报";
+    testButton.textContent = currentLanguage === "en" ? "Test speech" : "测试播报";
 
     const resetButton = document.createElement("button");
     resetButton.className = "ghost-action compact-action";
     resetButton.type = "button";
     resetButton.dataset.actionId = action.id;
     resetButton.dataset.action = "reset";
-    resetButton.textContent = "恢复默认";
+    resetButton.textContent = currentLanguage === "en" ? "Restore default" : "恢复默认";
 
     actions.append(testButton, resetButton);
     row.append(header, fields, actions);
@@ -1351,13 +2168,16 @@ function updateActionGuide() {
   const optionalInputCount = new Set(
     visibleActions.filter((action) => action.input !== "blink").map((action) => action.input),
   ).size;
-  actionGuideMode.textContent = optionalInputCount > 0 ? `已启用 ${optionalInputCount} 类可选输入` : "仅眨眼";
+  actionGuideMode.textContent =
+    optionalInputCount > 0
+      ? localizeRuntimeText(`已启用 ${optionalInputCount} 类可选输入`)
+      : t("blinkOnly");
   actionGuideList.innerHTML = "";
 
   if (visibleActions.length === 0) {
     const empty = document.createElement("div");
     empty.className = "action-guide-empty";
-    empty.textContent = "当前未启用动作输入。";
+    empty.textContent = localizeRuntimeText("当前未启用动作输入。");
     actionGuideList.append(empty);
     return;
   }
@@ -1402,7 +2222,13 @@ function getActiveSecondarySelection(now = performance.now()) {
   }
 
   const group = SECONDARY_SELECTION_GROUPS[state.secondarySelection.groupId];
-  const label = group ? `${group.label}超时` : "二级选择超时";
+  const label = group
+    ? currentLanguage === "en"
+      ? `${group.label} timed out`
+      : `${group.label}超时`
+    : currentLanguage === "en"
+      ? "Secondary selection timed out"
+      : "二级选择超时";
   clearSecondarySelection();
   setCommunicationMessage("二级选择已取消", label);
   addLog(`${label}，已取消`);
@@ -1421,11 +2247,14 @@ function secondarySelectionOptionLabel(group, option) {
   }
 
   if (option.type === "blinkOnly") {
-    return "仅用眨眼";
+    return currentLanguage === "en" ? "Blink only" : "仅用眨眼";
   }
 
   if (option.type === "toggleInput") {
     const checked = Boolean(OPTIONAL_INPUT_CHANNELS[option.channel]?.toggle.checked);
+    if (currentLanguage === "en") {
+      return `${option.label}: ${checked ? "On" : "Off"}`;
+    }
     return `${option.label}：${checked ? "开启" : "关闭"}`;
   }
 
@@ -1517,7 +2346,7 @@ function startSecondarySelection(group, action, label = action?.label || group.l
   scheduleSecondarySelectionScan();
 
   const actionText = getActionText(action);
-  const prompt = `${actionText}，${group.promptSuffix}`;
+  const prompt = currentLanguage === "en" ? `${actionText} ${group.promptSuffix}.` : `${actionText}，${group.promptSuffix}`;
   setCommunicationMessage(prompt, label);
   speak(prompt);
   addLog(`${label}：进入二级选择`);
@@ -1608,7 +2437,7 @@ function selectSecondarySelection(index = state.secondarySelection.index, source
   return true;
 }
 
-function cancelSecondarySelection({ reason = "cancel", shouldSpeak = true, sourceLabel = "取消" } = {}) {
+function cancelSecondarySelection({ reason = "cancel", shouldSpeak = true, sourceLabel = t("cancel") } = {}) {
   const group = activeSecondarySelectionGroup();
   if (!group) {
     return false;
@@ -1627,7 +2456,14 @@ function cancelSecondarySelection({ reason = "cancel", shouldSpeak = true, sourc
     return true;
   }
 
-  const label = reason === "timeout" ? `${group.label}超时` : `${group.label}：${sourceLabel}`;
+  const label =
+    reason === "timeout"
+      ? currentLanguage === "en"
+        ? `${group.label} timed out`
+        : `${group.label}超时`
+      : currentLanguage === "en"
+        ? `${group.label}: ${sourceLabel}`
+        : `${group.label}：${sourceLabel}`;
   if (shouldSpeak) {
     announce("已取消", label, { shouldSpeak: true });
   } else {
@@ -1650,7 +2486,7 @@ function resolveSecondarySelectionBlinkCode(code) {
   }
 
   if (code === "..") {
-    selectSecondarySelection(undefined, "两次短眨");
+    selectSecondarySelection(undefined, currentLanguage === "en" ? "two short blinks" : "两次短眨");
     return true;
   }
 
@@ -1662,7 +2498,7 @@ function resolveSecondarySelectionBlinkCode(code) {
   }
 
   if (code.includes("-")) {
-    cancelSecondarySelection({ sourceLabel: "长闭眼取消" });
+    cancelSecondarySelection({ sourceLabel: currentLanguage === "en" ? "long eye closure cancel" : "长闭眼取消" });
     return true;
   }
 
@@ -1678,8 +2514,11 @@ function startActionConfirmation(action, label = action?.label || "") {
     confirmedText: getActionText(action),
     expiresAt: performance.now() + CONFIRMATION_TIMEOUT_MS,
   };
-  const prompt = `检测到：${getActionText(action)}。连续两次短眨确认，长闭眼取消。`;
-  announce(prompt, `${label}待确认`, { shouldSpeak: true });
+  const prompt =
+    currentLanguage === "en"
+      ? `Detected: ${getActionText(action)} Use two short blinks to confirm, or long eye closure to cancel.`
+      : `检测到：${getActionText(action)}。连续两次短眨确认，长闭眼取消。`;
+  announce(prompt, currentLanguage === "en" ? `${label} pending confirmation` : `${label}待确认`, { shouldSpeak: true });
 }
 
 function announceAction(action, label = action?.label || "") {
@@ -1710,10 +2549,12 @@ function executeConfiguredAction(action, label = action?.label || "") {
 }
 
 function setCommunicationMessage(text, gestureLabel = "") {
-  state.lastPhrase = text;
-  messageText.textContent = text;
+  const displayText = localizeRuntimeText(text);
+  const displayLabel = localizeRuntimeText(gestureLabel);
+  state.lastPhrase = displayText;
+  messageText.textContent = displayText;
   if (gestureLabel) {
-    lastGesture.textContent = gestureLabel;
+    lastGesture.textContent = displayLabel;
   }
 
   if (state.recording.pendingRecordId) {
@@ -1728,8 +2569,8 @@ function setCommunicationMessage(text, gestureLabel = "") {
         displayLatencyFromDetectionMs: Number.isFinite(record.detectedAtMs)
           ? Math.round(displayAt - record.detectedAtMs)
           : null,
-        text,
-        label: gestureLabel || record.label,
+        text: displayText,
+        label: displayLabel || record.label,
       });
     }
   }
@@ -1742,13 +2583,14 @@ function cancelSpeech() {
 }
 
 function speak(text = state.lastPhrase) {
-  if (!("speechSynthesis" in window) || !text || text === "等待输入") {
+  const speechText = localizeRuntimeText(text);
+  if (!("speechSynthesis" in window) || !speechText || speechText === t("waitingInput")) {
     return;
   }
 
   cancelSpeech();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "zh-CN";
+  const utterance = new SpeechSynthesisUtterance(speechText);
+  utterance.lang = t("speechLang");
   utterance.rate = 0.9;
   utterance.pitch = 1;
   utterance.volume = 1;
@@ -1971,8 +2813,8 @@ function loadSavedCalibrationProfile() {
   const savedDateText =
     savedDate && !Number.isNaN(savedDate.getTime())
       ? savedDate.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
-      : "本地";
-  guidedTestStatus.textContent = `已载入同一患者本地校准档案（${savedDateText}）。更换患者或状态变化时请重置。`;
+      : currentLanguage === "en" ? "local" : "本地";
+  guidedTestStatus.textContent = localizeRuntimeText(`已载入同一患者本地校准档案（${savedDateText}）。更换患者或状态变化时请重置。`);
   setCommunicationMessage("已载入校准档案，可以开始通信输入。", "校准已载入");
   addLog("已载入本机保存的校准档案");
   updateCalibrationUI();
@@ -2026,18 +2868,27 @@ function updateCalibrationUI() {
     !isConfirmed;
   calibrationStatus.textContent = state.calibration.active
     ? isConfirmed
-      ? "已确认"
-      : `${activeCalibrationStepIndex}/${activeCalibrationStepCount}${state.calibration.collecting ? " 采集中" : ""}`
-    : "未开始";
+      ? currentLanguage === "en" ? "Confirmed" : "已确认"
+      : `${activeCalibrationStepIndex}/${activeCalibrationStepCount}${state.calibration.collecting ? currentLanguage === "en" ? " collecting" : " 采集中" : ""}`
+    : t("notStarted");
   if (!state.calibration.active) {
-    calibrationTitle.textContent = "准备校准";
-    calibrationInstruction.textContent = "先点击摄像头区域的“启动”，确认人脸完整、光线稳定后点击“开始校准”。";
+    calibrationTitle.textContent = currentLanguage === "en" ? "Prepare calibration" : "准备校准";
+    calibrationInstruction.textContent =
+      currentLanguage === "en"
+        ? "First click Start in the camera area. After the full face is visible and lighting is stable, click Start calibration."
+        : "先点击摄像头区域的“启动”，确认人脸完整、光线稳定后点击“开始校准”。";
   } else if (isConfirmed) {
-    calibrationTitle.textContent = "校准已完成";
-    calibrationInstruction.textContent = "可以开始通信输入；同一患者下次打开会自动沿用，状态变化明显时再重新校准。";
+    calibrationTitle.textContent = currentLanguage === "en" ? "Calibration complete" : "校准已完成";
+    calibrationInstruction.textContent =
+      currentLanguage === "en"
+        ? "Communication input is ready. The same patient profile will be reused next time; recalibrate if the condition changes noticeably."
+        : "可以开始通信输入；同一患者下次打开会自动沿用，状态变化明显时再重新校准。";
   } else if (isWaitingForCamera) {
     calibrationTitle.textContent = step.title;
-    calibrationInstruction.textContent = "请先点击摄像头区域的“启动”并允许摄像头权限，看到人脸后再采集。";
+    calibrationInstruction.textContent =
+      currentLanguage === "en"
+        ? "Click Start in the camera area and allow camera permission. Collect after the face is visible."
+        : "请先点击摄像头区域的“启动”并允许摄像头权限，看到人脸后再采集。";
   } else {
     calibrationTitle.textContent = step.title;
     calibrationInstruction.textContent = step.instruction;
@@ -2049,23 +2900,25 @@ function updateCalibrationUI() {
     : complete
       ? "100%"
       : "0%";
-  calibrationStartButton.textContent = state.calibration.active ? "重新校准" : "开始校准";
+  calibrationStartButton.textContent = state.calibration.active
+    ? currentLanguage === "en" ? "Recalibrate" : "重新校准"
+    : currentLanguage === "en" ? "Start calibration" : "开始校准";
   calibrationCollectButton.textContent = isWaitingForCamera
-    ? "等待摄像头"
+    ? currentLanguage === "en" ? "Waiting for camera" : "等待摄像头"
     : state.calibration.collecting
-      ? "采集中"
+      ? currentLanguage === "en" ? "Collecting" : "采集中"
       : step.kind === "blink"
-        ? "开始记录"
-        : "采集";
+        ? currentLanguage === "en" ? "Start recording" : "开始记录"
+        : t("collect");
   calibrationCollectButton.hidden =
     !state.calibration.active || isConfirmed || isTestStep || step.kind === "check";
   calibrationCollectButton.disabled = !canCollect;
   calibrationNextButton.hidden = !state.calibration.active || !isTestStep || isConfirmed;
   calibrationNextButton.textContent = isTestStep
     ? isConfirmed
-      ? "已确认"
-      : "完成确认"
-    : "下一步";
+      ? currentLanguage === "en" ? "Confirmed" : "已确认"
+      : currentLanguage === "en" ? "Confirm" : "完成确认"
+    : t("next");
   calibrationNextButton.disabled = isTestStep ? !canConfirm : !canAdvance;
   calibrationResetButton.hidden = !state.calibration.active;
   guidedTestSelect.disabled =
@@ -2100,7 +2953,7 @@ function resetCalibration() {
   state.calibration.samples.shortBlinkDurations = [];
   state.calibration.samples.longBlinkDurations = [];
   calibratedThresholdResult.textContent = "--";
-  guidedTestStatus.textContent = "校准已重置。点击“开始校准”后按提示采集。";
+  guidedTestStatus.textContent = localizeRuntimeText("校准已重置。点击“开始校准”后按提示采集。");
   updateCalibrationUI();
   addLog("引导校准已重置，本地校准档案已清除");
 }
@@ -2127,8 +2980,12 @@ function startCalibrationGuide() {
   calibratedThresholdResult.textContent = "--";
   markCalibrationStepComplete("position");
   guidedTestStatus.textContent = state.running
-    ? "请保持自然睁眼，准备好后点击“采集”。"
-    : "请先点击摄像头区域的“启动”，看到人脸后再采集。";
+    ? currentLanguage === "en"
+      ? "Keep the eyes naturally open. Click Collect when ready."
+      : "请保持自然睁眼，准备好后点击“采集”。"
+    : currentLanguage === "en"
+      ? "Click Start in the camera area first. Collect after the face is visible."
+      : "请先点击摄像头区域的“启动”，看到人脸后再采集。";
   updateCalibrationUI();
   addLog("引导校准已开始");
 }
@@ -2141,15 +2998,23 @@ function prepareCurrentCalibrationStep() {
       guidedTestSelect.value = nextCode;
     }
     guidedTestStatus.textContent = hasCompletedGuidedTests()
-      ? "短码测试已全部通过，也可以重新选择项目复测。"
-      : `核心校准完成，可直接点“完成确认”。短码测试可选，当前进度 ${guidedTestProgressText()}。`;
+      ? currentLanguage === "en"
+        ? "All blink-code tests have passed. You can also choose an item to retest."
+        : "短码测试已全部通过，也可以重新选择项目复测。"
+      : currentLanguage === "en"
+        ? `Core calibration is complete. You can click Confirm now. Blink-code testing is optional. Progress ${guidedTestProgressText()}.`
+        : `核心校准完成，可直接点“完成确认”。短码测试可选，当前进度 ${guidedTestProgressText()}。`;
     return;
   }
 
   guidedTestStatus.textContent =
     step.kind === "blink"
-      ? `${step.title}：点击“开始记录”后按提示做动作。`
-      : `${step.title}：准备好后点击“采集”。`;
+      ? currentLanguage === "en"
+        ? `${step.title}: click Start recording and follow the prompt.`
+        : `${step.title}：点击“开始记录”后按提示做动作。`
+      : currentLanguage === "en"
+        ? `${step.title}: click Collect when ready.`
+        : `${step.title}：准备好后点击“采集”。`;
 }
 
 function advanceToNextCalibrationStep() {
@@ -2174,7 +3039,10 @@ function moveToNextCalibrationStep() {
 
   if (step.kind === "test") {
     if (state.calibration.activeTestCode) {
-      guidedTestStatus.textContent = "当前测试还在等待输入，请先完成或重置校准。";
+      guidedTestStatus.textContent =
+        currentLanguage === "en"
+          ? "The current test is still waiting for input. Complete it or reset calibration first."
+          : "当前测试还在等待输入，请先完成或重置校准。";
       addLog("短码测试等待输入中，暂不能完成确认");
       return;
     }
@@ -2182,8 +3050,12 @@ function moveToNextCalibrationStep() {
     markCalibrationStepComplete(step.id);
     state.calibration.confirmed = true;
     guidedTestStatus.textContent = hasCompletedGuidedTests()
-      ? "全部短码测试已通过，校准已确认。工程测试仍可继续复测。"
-      : `校准已确认。工程测试可继续验证短码，当前进度 ${guidedTestProgressText()}。`;
+      ? currentLanguage === "en"
+        ? "All blink-code tests passed. Calibration is confirmed. Engineering tests can still be repeated."
+        : "全部短码测试已通过，校准已确认。工程测试仍可继续复测。"
+      : currentLanguage === "en"
+        ? `Calibration confirmed. Engineering tests can continue checking blink codes. Progress ${guidedTestProgressText()}.`
+        : `校准已确认。工程测试可继续验证短码，当前进度 ${guidedTestProgressText()}。`;
     setCommunicationMessage("校准已确认，可以开始通信输入。", "校准完成");
     addLog("引导校准已确认完成");
     saveCalibrationProfile();
@@ -2205,7 +3077,7 @@ function beginCalibrationCollection() {
   }
 
   if (!state.running) {
-    guidedTestStatus.textContent = "请先启动摄像头，再采集校准样本。";
+    guidedTestStatus.textContent = localizeRuntimeText("请先启动摄像头，再采集校准样本。");
     addLog("请先启动摄像头再采集校准样本");
     return;
   }
@@ -2217,7 +3089,7 @@ function beginCalibrationCollection() {
   }
 
   if (step.kind === "test") {
-    guidedTestStatus.textContent = "核心校准已完成，可直接点“完成确认”。短码测试是可选验证。";
+    guidedTestStatus.textContent = localizeRuntimeText("核心校准已完成，可直接点“完成确认”。短码测试是可选验证。");
     return;
   }
 
@@ -2231,8 +3103,12 @@ function beginCalibrationCollection() {
   calibrationProgress.classList.add("is-collecting");
   guidedTestStatus.textContent =
     step.kind === "blink"
-      ? `${step.title}采集中，请按提示做动作。`
-      : `${step.title}采集中，请保持姿势。`;
+      ? currentLanguage === "en"
+        ? `${step.title}: collecting. Follow the action prompt.`
+        : `${step.title}采集中，请按提示做动作。`
+      : currentLanguage === "en"
+        ? `${step.title}: collecting. Please hold the pose.`
+        : `${step.title}采集中，请保持姿势。`;
   addLog(`开始采集：${step.title}`);
   updateCalibrationUI();
 }
@@ -2318,19 +3194,19 @@ function recordCalibrationBlink(symbol, duration) {
 
 function startGuidedTest() {
   if (!state.running) {
-    guidedTestStatus.textContent = "请先启动摄像头";
+    guidedTestStatus.textContent = localizeRuntimeText("请先启动摄像头");
     addLog("请先启动摄像头再测试短码");
     return;
   }
 
   if (!state.calibration.active || currentCalibrationStep().kind !== "test") {
-    guidedTestStatus.textContent = "请先完成前面校准步骤，并进入“测试短码”。";
+    guidedTestStatus.textContent = localizeRuntimeText("请先完成前面校准步骤，并进入“测试短码”。");
     addLog("尚未进入短码测试步骤");
     return;
   }
 
   if (!hasCompletedCoreCalibration()) {
-    guidedTestStatus.textContent = "请先完成睁眼、闭眼、短眨和长闭眼样本采集。";
+    guidedTestStatus.textContent = localizeRuntimeText("请先完成睁眼、闭眼、短眨和长闭眼样本采集。");
     addLog("核心校准未完成，暂不能测试短码");
     return;
   }
@@ -2341,7 +3217,7 @@ function startGuidedTest() {
   resetGestureSequences();
   state.calibration.guidedRestFirstLongAt = 0;
   state.calibration.activeTestCode = guidedTestSelect.value;
-  guidedTestStatus.textContent = `等待输入：${displayBlinkCode(state.calibration.activeTestCode)}`;
+  guidedTestStatus.textContent = localizeRuntimeText(`等待输入：${displayBlinkCode(state.calibration.activeTestCode)}`);
   addLog(`开始测试短码 ${state.calibration.activeTestCode}`);
   updateCalibrationUI();
 }
@@ -2368,7 +3244,7 @@ function recordGuidedTestCode(
       correct: null,
       note: "guided_test_waiting_second_long_and_short_blink",
     });
-    guidedTestStatus.textContent = "已收到第一次长闭眼，请继续做第二次长闭眼，再在约 1.6 秒内短眨。";
+    guidedTestStatus.textContent = localizeRuntimeText("已收到第一次长闭眼，请继续做第二次长闭眼，再在约 1.6 秒内短眨。");
     addLog("输入管理短码测试：已收到第一次长闭眼，等待第二次长闭眼和短眨");
     finishPendingTestRecord();
     updateCalibrationUI();
@@ -2412,7 +3288,7 @@ function recordGuidedTestCode(
         correct: null,
         note: "guided_test_waiting_second_long_blink",
       });
-      guidedTestStatus.textContent = "已收到第一次长闭眼，请在 6 秒内再做一次长闭眼。";
+      guidedTestStatus.textContent = localizeRuntimeText("已收到第一次长闭眼，请在 6 秒内再做一次长闭眼。");
       addLog("两次长闭眼测试：已收到第一次长闭眼，等待第二次");
       finishPendingTestRecord();
       updateCalibrationUI();
@@ -2442,12 +3318,12 @@ function recordGuidedTestCode(
     const nextCode = GUIDED_TEST_CODES.find((testCode) => !state.calibration.guidedTestResults[testCode]?.passed);
     if (nextCode) {
       guidedTestSelect.value = nextCode;
-      guidedTestStatus.textContent = `通过：收到 ${displayBlinkCode(code)}。可点“完成确认”，也可继续测试 ${displayBlinkCode(nextCode)}。进度 ${guidedTestProgressText()}。`;
+      guidedTestStatus.textContent = localizeRuntimeText(`通过：收到 ${displayBlinkCode(code)}。可点“完成确认”，也可继续测试 ${displayBlinkCode(nextCode)}。进度 ${guidedTestProgressText()}。`);
     } else {
-      guidedTestStatus.textContent = "全部短码测试已通过，可以点击“完成确认”。";
+      guidedTestStatus.textContent = localizeRuntimeText("全部短码测试已通过，可以点击“完成确认”。");
     }
   } else {
-    guidedTestStatus.textContent = `不匹配：期望 ${displayBlinkCode(expected)}，收到 ${overflowed ? "过长短码" : displayBlinkCode(code)}。请重新点“测试”。`;
+    guidedTestStatus.textContent = localizeRuntimeText(`不匹配：期望 ${displayBlinkCode(expected)}，收到 ${overflowed ? "过长短码" : displayBlinkCode(code)}。请重新点“测试”。`);
   }
   finishPendingTestRecord();
   updateCalibrationUI();
@@ -2759,7 +3635,7 @@ function pauseRecognition({ preserveMessage = false } = {}) {
   clearSecondarySelection();
   resetGestureSequences();
   resetDetectionWindow();
-  pauseRecognitionButton.querySelector("span").textContent = "继续";
+  pauseRecognitionButton.querySelector("span").textContent = localizeRuntimeText("继续");
   if (!preserveMessage) {
     setCommunicationMessage("识别已暂停", "休息");
   }
@@ -2770,7 +3646,7 @@ function resumeRecognition() {
   clearSeparatedLongBlink();
   clearPendingConfirmation();
   clearSecondarySelection();
-  pauseRecognitionButton.querySelector("span").textContent = "暂停";
+  pauseRecognitionButton.querySelector("span").textContent = t("pauseRecognition");
   setCommunicationMessage("等待输入", "继续");
 }
 
@@ -3098,7 +3974,7 @@ function handleGestureEvent(event, label) {
   if (event.name === "HEAD_SHAKE") {
     const activeGroup = activeSecondarySelectionGroup();
     if (activeGroup?.id === "inputChannels") {
-      lastGesture.textContent = "输入管理中忽略摇头";
+      lastGesture.textContent = localizeRuntimeText("输入管理中忽略摇头");
       addLog("输入管理中忽略摇头动作，避免刚开启摇头时误退出");
       finishPendingTestRecord({ note: "head_shake_ignored_during_input_management" });
       return;
@@ -3407,7 +4283,7 @@ async function enumerateCameras(preferredDeviceId = "") {
   if (cameras.length === 0) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "没有可用摄像头";
+    option.textContent = currentLanguage === "en" ? "No available camera" : "没有可用摄像头";
     cameraSelect.append(option);
     state.selectedDeviceId = "";
     return cameras;
@@ -3416,14 +4292,14 @@ async function enumerateCameras(preferredDeviceId = "") {
   cameras.forEach((device, index) => {
     const option = document.createElement("option");
     option.value = device.deviceId;
-    option.textContent = device.label || `摄像头 ${index + 1}`;
+    option.textContent = device.label || (currentLanguage === "en" ? `Camera ${index + 1}` : `摄像头 ${index + 1}`);
     cameraSelect.append(option);
   });
 
   if (!state.cameraLabelsReady && !preferredDeviceId) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "授权后显示摄像头名称";
+    option.textContent = currentLanguage === "en" ? "Camera names appear after permission" : "授权后显示摄像头名称";
     option.selected = true;
     cameraSelect.prepend(option);
   }
@@ -3555,8 +4431,10 @@ async function startCamera(deviceId = state.selectedDeviceId) {
     setStatus("浏览器不支持", "error");
     addLog("当前浏览器无法访问摄像头");
     showDiagnostic(
-      "当前浏览器不支持摄像头",
-      `请用 Chrome 或 Safari 打开 ${window.location.href}，再允许摄像头权限。`,
+      currentLanguage === "en" ? "This browser does not support camera access" : "当前浏览器不支持摄像头",
+      currentLanguage === "en"
+        ? `Open ${window.location.href} in Chrome or Safari, then allow camera permission.`
+        : `请用 Chrome 或 Safari 打开 ${window.location.href}，再允许摄像头权限。`,
     );
     return;
   }
@@ -3565,8 +4443,10 @@ async function startCamera(deviceId = state.selectedDeviceId) {
     setStatus("需要安全连接", "error");
     addLog("摄像头需要 HTTPS 或本机安全环境");
     showDiagnostic(
-      "摄像头需要安全连接",
-      "请使用 HTTPS 地址，或在本机 localhost/桌面应用中打开。",
+      currentLanguage === "en" ? "Camera requires a secure connection" : "摄像头需要安全连接",
+      currentLanguage === "en"
+        ? "Use an HTTPS address, or open it from localhost / the desktop app on this computer."
+        : "请使用 HTTPS 地址，或在本机 localhost/桌面应用中打开。",
     );
     return;
   }
@@ -3682,7 +4562,12 @@ function handleCameraEnded(endedStream) {
   setStatus("摄像头断开", "error");
   resetLiveMetrics("已断开");
   addLog("摄像头已断开");
-  showDiagnostic("摄像头已断开", "摄像头设备被系统断开或被其他应用接管。请确认设备可用后重新启动。");
+  showDiagnostic(
+    currentLanguage === "en" ? "Camera disconnected" : "摄像头已断开",
+    currentLanguage === "en"
+      ? "The camera was disconnected by the system or taken over by another app. Confirm the device is available, then restart."
+      : "摄像头设备被系统断开或被其他应用接管。请确认设备可用后重新启动。",
+  );
 }
 
 function formatCameraError(error) {
@@ -3690,47 +4575,65 @@ function formatCameraError(error) {
     return {
       status: "模型失败",
       log: "人脸模型加载失败",
-      title: "人脸模型加载失败",
-      message: "本地模型或 wasm 文件没有正确加载。请重新运行 npm install，并确认开发服务器仍在当前项目目录启动。",
+      title: currentLanguage === "en" ? "Face model failed to load" : "人脸模型加载失败",
+      message:
+        currentLanguage === "en"
+          ? "The local model or WASM files did not load correctly. Run npm install again and make sure the dev server is running in the current project folder."
+          : "本地模型或 wasm 文件没有正确加载。请重新运行 npm install，并确认开发服务器仍在当前项目目录启动。",
     };
   }
   if (error.name === "NotAllowedError") {
     return {
       status: "摄像头失败",
       log: "摄像头权限被拒绝",
-      title: "摄像头权限被拒绝",
-      message: `当前浏览器没有摄像头权限。请用 Chrome 或 Safari 打开 ${window.location.href}，或在 macOS「隐私与安全性 > 相机」允许当前浏览器后重试。`,
+      title: currentLanguage === "en" ? "Camera permission denied" : "摄像头权限被拒绝",
+      message:
+        currentLanguage === "en"
+          ? `This browser does not have camera permission. Open ${window.location.href} in Chrome or Safari, or allow camera access in macOS Privacy & Security > Camera, then retry.`
+          : `当前浏览器没有摄像头权限。请用 Chrome 或 Safari 打开 ${window.location.href}，或在 macOS「隐私与安全性 > 相机」允许当前浏览器后重试。`,
     };
   }
   if (error.name === "NotFoundError") {
     return {
       status: "摄像头失败",
       log: "没有找到可用摄像头",
-      title: "没有找到可用摄像头",
-      message: "请确认 MacBook 摄像头可用，且没有被系统禁用。",
+      title: currentLanguage === "en" ? "No available camera found" : "没有找到可用摄像头",
+      message:
+        currentLanguage === "en"
+          ? "Make sure the MacBook camera is available and not disabled by the system."
+          : "请确认 MacBook 摄像头可用，且没有被系统禁用。",
     };
   }
   if (error.name === "NotReadableError") {
     return {
       status: "摄像头失败",
       log: "摄像头被其他应用占用",
-      title: "摄像头被占用",
-      message: "请先关闭 FaceTime、Zoom、Teams、微信视频等正在使用摄像头的应用，再点击启动。",
+      title: currentLanguage === "en" ? "Camera is in use" : "摄像头被占用",
+      message:
+        currentLanguage === "en"
+          ? "Close FaceTime, Zoom, Teams, WeChat video, or any other app using the camera, then click Start."
+          : "请先关闭 FaceTime、Zoom、Teams、微信视频等正在使用摄像头的应用，再点击启动。",
     };
   }
   if (error.name === "OverconstrainedError") {
     return {
       status: "摄像头失败",
       log: "指定摄像头不可用，已准备切回默认摄像头",
-      title: "指定摄像头不可用",
-      message: "请在摄像头下拉框里切换设备，或重新点击启动使用系统默认摄像头。",
+      title: currentLanguage === "en" ? "Selected camera unavailable" : "指定摄像头不可用",
+      message:
+        currentLanguage === "en"
+          ? "Switch devices in the camera dropdown, or click Start again to use the system default camera."
+          : "请在摄像头下拉框里切换设备，或重新点击启动使用系统默认摄像头。",
     };
   }
   return {
     status: "启动失败",
     log: error.message || "摄像头启动失败",
-    title: "摄像头启动失败",
-    message: `${error.name || "UnknownError"}：${error.message || "没有更多错误信息"}`,
+    title: currentLanguage === "en" ? "Camera start failed" : "摄像头启动失败",
+    message:
+      currentLanguage === "en"
+        ? `${error.name || "UnknownError"}: ${error.message || "No further error information"}`
+        : `${error.name || "UnknownError"}：${error.message || "没有更多错误信息"}`,
   };
 }
 
@@ -3760,7 +4663,10 @@ function detectLoop() {
       setStatus("检测失败", "error");
       addLog("检测循环出现错误，已暂停");
       stopCamera(false);
-      showDiagnostic("检测循环出现错误", error.message || "请刷新页面后重试。");
+      showDiagnostic(
+        currentLanguage === "en" ? "Detection loop error" : "检测循环出现错误",
+        error.message || (currentLanguage === "en" ? "Refresh the page and try again." : "请刷新页面后重试。"),
+      );
       return;
     }
   }
@@ -3793,7 +4699,7 @@ function processFaceSignals(signals, now) {
   updateGestureMeters(detectionSignals);
 
   if (isRecognitionPaused(now)) {
-    blinkState.textContent = "暂停";
+    blinkState.textContent = localizeRuntimeText("暂停");
     resetDetectionWindow();
     resetGestureSequences();
     gestureDetectors.brow.reset();
@@ -3807,7 +4713,7 @@ function processFaceSignals(signals, now) {
   getActiveConfirmation(now);
 
   if (!signals.hasFace) {
-    blinkState.textContent = "未见人脸";
+    blinkState.textContent = localizeRuntimeText("未见人脸");
     earValue.textContent = "--";
     confidenceLabel.textContent = "--";
     earBar.style.width = "0%";
@@ -3826,7 +4732,7 @@ function processFaceSignals(signals, now) {
   const ear = signals.ear;
 
   if (ear === null) {
-    blinkState.textContent = "关键点不足";
+    blinkState.textContent = localizeRuntimeText("关键点不足");
     earValue.textContent = "--";
     confidenceLabel.textContent = "--";
     earBar.style.width = "0%";
@@ -3845,7 +4751,7 @@ function processFaceSignals(signals, now) {
 
   earValue.textContent = ear.toFixed(3);
   earBar.style.width = `${Math.round(openness * 100)}%`;
-  confidenceLabel.textContent = isClosed ? "闭合" : "睁开";
+  confidenceLabel.textContent = localizeRuntimeText(isClosed ? "闭合" : "睁开");
   collectCalibrationFrame(signals, now);
 
   if (isClosed) {
@@ -3861,13 +4767,13 @@ function processFaceSignals(signals, now) {
 
   if (state.closedFrames >= holdFrames && state.blinkArmed) {
     state.blinkArmed = false;
-    blinkState.textContent = "闭眼";
+    blinkState.textContent = localizeRuntimeText("闭眼");
   }
 
   if (!isClosed && !state.blinkArmed && state.openFrames >= 2) {
     state.blinkTotal += 1;
     blinkCount.textContent = state.blinkTotal.toString();
-    blinkState.textContent = "眨眼";
+    blinkState.textContent = localizeRuntimeText("眨眼");
     state.blinkArmed = true;
     handleBlinkReleased(now, ear);
     state.closedFrames = 0;
@@ -3875,14 +4781,14 @@ function processFaceSignals(signals, now) {
   }
 
   if (!isClosed && state.blinkArmed) {
-    blinkState.textContent = "睁眼";
+    blinkState.textContent = localizeRuntimeText("睁眼");
     state.closedFrames = 0;
     state.blinkWasClosed = false;
     state.blinkClosedAt = null;
   }
 
   if (isFaceScaleUnstable(signals, now)) {
-    lastGesture.textContent = "画面稳定中";
+    lastGesture.textContent = localizeRuntimeText("画面稳定中");
     resetGestureSequences();
     gestureDetectors.brow.reset();
     gestureDetectors.secondaryBrow.reset();
@@ -3911,7 +4817,7 @@ function processFaceSignals(signals, now) {
     gestureDetectors.secondaryBrow.update(detectionSignals.browUp, now, browToggle.checked);
   } else if (headMotionSuppressesBrow) {
     if (browToggle.checked) {
-      lastGesture.textContent = "点头中，抬眉暂停";
+      lastGesture.textContent = localizeRuntimeText("点头中，抬眉暂停");
     }
     gestureDetectors.brow.reset();
     gestureDetectors.secondaryBrow.reset();
@@ -3925,7 +4831,7 @@ function processFaceSignals(signals, now) {
 
   if (headMotionSuppressesSmile) {
     if (smileToggle.checked && now - headShakeDetector.lastTriggerAt > 250) {
-      lastGesture.textContent = "摇头中，微笑暂停";
+      lastGesture.textContent = localizeRuntimeText("摇头中，微笑暂停");
     }
     resetSmileSequence();
     gestureDetectors.smile.reset();
@@ -4045,13 +4951,50 @@ function resetCounters() {
   clearSecondarySelection();
   resetGestureSequences();
   blinkCount.textContent = "0";
-  blinkState.textContent = state.running ? "检测中" : "未检测";
+  blinkState.textContent = localizeRuntimeText(state.running ? "检测中" : "未检测");
   emergencyOverlay.classList.remove("is-active");
   if (emergencyFlashTimer) {
     clearTimeout(emergencyFlashTimer);
     emergencyFlashTimer = null;
   }
   addLog("计数已清零");
+}
+
+function applyLanguage({ loadActionText = true } = {}) {
+  applyStaticLanguage();
+  applySecondarySelectionLanguage();
+  applyCalibrationLanguage();
+
+  if (loadActionText) {
+    loadSavedActionTextConfig();
+  } else {
+    applyActionConfigLanguage();
+  }
+
+  renderActionSettings();
+  updateActionGuide();
+  updateRecordingUI();
+  updateCalibrationUI();
+  renderSecondarySelection();
+  pauseRecognitionButton.querySelector("span").textContent = isPausedStateActive()
+    ? localizeRuntimeText("继续")
+    : t("pauseRecognition");
+}
+
+function switchLanguage(nextLanguage) {
+  if (!SUPPORTED_LANGUAGES.includes(nextLanguage) || nextLanguage === currentLanguage) {
+    return;
+  }
+
+  saveActionTextConfig({ silent: true });
+  currentLanguage = nextLanguage;
+  try {
+    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, currentLanguage);
+  } catch {
+    // Language still changes for the current session.
+  }
+  applyLanguage();
+  setCommunicationMessage(t("waitingInput"), "--");
 }
 
 thresholdRange.addEventListener("input", () => {
@@ -4077,6 +5020,10 @@ stopButton.addEventListener("click", () => {
 });
 
 resetButton.addEventListener("click", resetCounters);
+
+languageToggleButton?.addEventListener("click", () => {
+  switchLanguage(currentLanguage === "zh" ? "en" : "zh");
+});
 
 repeatSpeechButton.addEventListener("click", () => {
   speak();
@@ -4255,19 +5202,16 @@ navigator.mediaDevices?.addEventListener?.("devicechange", () => {
 
 window.addEventListener("resize", resizeCanvas);
 
-refreshCameraList().catch(() => {
-  const option = document.createElement("option");
-  option.textContent = "等待权限";
-  option.value = "";
-  cameraSelect.append(option);
-});
-
 loadSavedInputChannelConfig();
-loadSavedActionTextConfig();
-renderActionSettings();
-updateActionGuide();
-updateRecordingUI();
+applyLanguage();
 
 if (!loadSavedCalibrationProfile()) {
   updateCalibrationUI();
 }
+
+refreshCameraList().catch(() => {
+  const option = document.createElement("option");
+  option.textContent = currentLanguage === "en" ? "Waiting for permission" : "等待权限";
+  option.value = "";
+  cameraSelect.append(option);
+});

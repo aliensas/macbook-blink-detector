@@ -108,6 +108,18 @@ button {
   gap: 20px;
 }
 
+.topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.language-toggle {
+  min-width: 92px;
+  justify-content: center;
+}
+
 .eyebrow {
   margin: 0 0 4px;
   color: var(--accent);

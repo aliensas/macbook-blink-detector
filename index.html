@@ -19,9 +19,14 @@
           <p class="eyebrow">Personalized Low-Fatigue AAC</p>
           <h1>面部微动作 AAC 输入原型</h1>
         </div>
-        <div class="status-pill" id="runtimeStatus">
-          <span class="dot dot-idle"></span>
-          <span>待启动</span>
+        <div class="topbar-actions">
+          <button class="ghost-action compact-action language-toggle" id="languageToggleButton" type="button" title="Switch language">
+            <span>English</span>
+          </button>
+          <div class="status-pill" id="runtimeStatus">
+            <span class="dot dot-idle"></span>
+            <span>待启动</span>
+          </div>
         </div>
       </header>
 
@@ -172,7 +177,7 @@
           </div>
 
           <div class="control-group">
-            <label>输入</label>
+            <label id="inputSectionLabel">输入</label>
             <div class="toggle-grid">
               <label class="input-channel-fixed"><input id="blinkCodeToggle" type="checkbox" checked disabled />眨眼短码 始终开启</label>
               <label><input id="browToggle" type="checkbox" />抬眉 是/确认</label>
