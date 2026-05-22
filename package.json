@@ -8,6 +8,7 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:ios": "node scripts/start-ios-dev.mjs",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "desktop": "npm run build && electron .",

@@ -20,3 +20,11 @@ http://127.0.0.1:5173/ios/
 ```
 
 该入口会进入同一套 Web 应用，并开启 `platform=ios` 布局模式。这样可以先验证 iPhone Safari / PWA，而不复制一份独立旧页面。
+
+iPhone 真机测试时使用：
+
+```bash
+npm run dev:ios
+```
+
+然后在同一 Wi-Fi 的 iPhone Safari 中打开终端打印出的 `https://<Mac局域网IP>:<端口>/ios/` 地址。
