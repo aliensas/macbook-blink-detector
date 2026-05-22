@@ -51,6 +51,12 @@ const codeBuffer = document.querySelector("#codeBuffer");
 const repeatSpeechButton = document.querySelector("#repeatSpeechButton");
 const clearSpeechButton = document.querySelector("#clearSpeechButton");
 const pauseRecognitionButton = document.querySelector("#pauseRecognitionButton");
+const secondarySelectionPanel = document.querySelector("#secondarySelectionPanel");
+const secondarySelectionTitle = document.querySelector("#secondarySelectionTitle");
+const secondarySelectionHint = document.querySelector("#secondarySelectionHint");
+const secondarySelectionOptions = document.querySelector("#secondarySelectionOptions");
+const secondarySelectionSelectButton = document.querySelector("#secondarySelectionSelectButton");
+const secondarySelectionCancelButton = document.querySelector("#secondarySelectionCancelButton");
 const actionGuideMode = document.querySelector("#actionGuideMode");
 const actionGuideList = document.querySelector("#actionGuideList");
 const blinkCodeToggle = document.querySelector("#blinkCodeToggle");
@@ -211,7 +217,7 @@ const DEFAULT_ACTION_CONFIG = [
     label: "短眨+长闭眼",
     displayText: "我想挠痒痒",
     speechText: "我想挠痒痒",
-    instruction: "先短眨并睁开；2.5 秒内开始长闭眼约 1 秒，最后必须睁开才触发。",
+    instruction: "先短眨并睁开；2.5 秒内开始长闭眼约 1 秒，触发后进入挠痒痒二级选择。",
     category: "care",
     input: "blink",
     enabled: true,
@@ -224,7 +230,7 @@ const DEFAULT_ACTION_CONFIG = [
     label: "长闭眼+短眨",
     displayText: "我想调整体位",
     speechText: "我想调整体位",
-    instruction: "先长闭眼约 1 秒并睁开；再短眨一次。",
+    instruction: "先长闭眼约 1 秒并睁开；再短眨一次，触发后进入调整体位二级选择。",
     category: "care",
     input: "blink",
     enabled: true,
@@ -313,6 +319,42 @@ const EVENT_GESTURE_IDS = {
   SMILE: "smile",
   SMILE_DOUBLE: "smile_double",
   HEAD_SHAKE: "head_shake",
+};
+const SECONDARY_SELECTION_SCAN_MS = 3220;
+const SECONDARY_SELECTION_TIMEOUT_MS = 90 * 1000;
+const SECONDARY_SELECTION_GROUPS = {
+  scratch: {
+    id: "scratch",
+    triggerGestureId: "blink_short_long",
+    label: "挠痒痒",
+    title: "我想挠痒痒：请选择位置",
+    promptSuffix: "请继续选择位置",
+    hint: "自动轮流高亮；两次短眨或轻抬眉后放松选择，长闭眼或摇头取消。",
+    options: [
+      { id: "scratch_head", label: "头部", text: "请帮我挠头部" },
+      { id: "scratch_face", label: "脸部/耳边", text: "请帮我挠脸部或耳边" },
+      { id: "scratch_back", label: "背部", text: "请帮我挠背部" },
+      { id: "scratch_arm", label: "手臂", text: "请帮我挠手臂" },
+      { id: "scratch_leg", label: "腿部", text: "请帮我挠腿部" },
+      { id: "scratch_check", label: "请查看", text: "请帮我查看哪里痒" },
+    ],
+  },
+  position: {
+    id: "position",
+    triggerGestureId: "blink_long_short",
+    label: "调整体位",
+    title: "我想调整体位：请选择方式",
+    promptSuffix: "请继续选择调整方式",
+    hint: "自动轮流高亮；两次短眨或轻抬眉后放松选择，长闭眼或摇头取消。",
+    options: [
+      { id: "position_left", label: "向左侧翻身", text: "请帮我向左侧翻身" },
+      { id: "position_right", label: "向右侧翻身", text: "请帮我向右侧翻身" },
+      { id: "position_raise", label: "抬高上身", text: "请帮我把头和上半身垫高一点" },
+      { id: "position_lower", label: "放低上身", text: "请帮我把头和上半身放低一点" },
+      { id: "position_pillow", label: "调整枕头", text: "请帮我调整枕头" },
+      { id: "position_legs", label: "调整腿脚", text: "请帮我调整腿部或脚的位置" },
+    ],
+  },
 };
 const CONFIRMATION_TIMEOUT_MS = 10 * 1000;
 const MOUTH_DOUBLE_WINDOW_MS = 6000;
@@ -406,6 +448,14 @@ const state = {
   blinkCodeLastAt: null,
   blinkCodeDurations: [],
   pendingSeparatedLongAt: 0,
+  secondarySelection: {
+    active: false,
+    groupId: "",
+    index: 0,
+    startedAt: 0,
+    expiresAt: 0,
+    scanTimer: 0,
+  },
   fpsSamples: [],
   lastFps: null,
   lastSignals: null,
@@ -477,7 +527,13 @@ function addLog(message) {
   state.sessionEvents.push({
     time: new Date().toISOString(),
     message,
-    mode: state.pendingConfirmation ? "confirm" : isPausedStateActive() ? "paused" : "direct",
+    mode: state.pendingConfirmation
+      ? "confirm"
+      : state.secondarySelection.active
+        ? "secondary"
+        : isPausedStateActive()
+          ? "paused"
+          : "direct",
   });
 
   if (state.sessionEvents.length > 300) {
@@ -1216,6 +1272,199 @@ function updateActionGuide() {
   });
 }
 
+function secondarySelectionGroupForAction(action) {
+  if (!action?.gestureId) {
+    return null;
+  }
+
+  return Object.values(SECONDARY_SELECTION_GROUPS).find((group) => group.triggerGestureId === action.gestureId) || null;
+}
+
+function getActiveSecondarySelection(now = performance.now()) {
+  if (!state.secondarySelection.active) {
+    return null;
+  }
+
+  if (now <= state.secondarySelection.expiresAt) {
+    return state.secondarySelection;
+  }
+
+  const group = SECONDARY_SELECTION_GROUPS[state.secondarySelection.groupId];
+  const label = group ? `${group.label}超时` : "二级选择超时";
+  clearSecondarySelection();
+  setCommunicationMessage("二级选择已取消", label);
+  addLog(`${label}，已取消`);
+  finishPendingTestRecord({ text: "二级选择已取消", label });
+  return null;
+}
+
+function activeSecondarySelectionGroup() {
+  const selection = getActiveSecondarySelection();
+  return selection ? SECONDARY_SELECTION_GROUPS[selection.groupId] || null : null;
+}
+
+function renderSecondarySelection() {
+  const group = activeSecondarySelectionGroup();
+  if (!secondarySelectionPanel || !secondarySelectionOptions) {
+    return;
+  }
+
+  if (!group) {
+    secondarySelectionPanel.hidden = true;
+    secondarySelectionOptions.innerHTML = "";
+    return;
+  }
+
+  secondarySelectionPanel.hidden = false;
+  secondarySelectionTitle.textContent = group.title;
+  secondarySelectionHint.textContent = group.hint;
+  secondarySelectionOptions.innerHTML = "";
+
+  group.options.forEach((option, index) => {
+    const optionButton = document.createElement("button");
+    optionButton.className = `secondary-selection-option${index === state.secondarySelection.index ? " is-active" : ""}`;
+    optionButton.type = "button";
+    optionButton.dataset.index = String(index);
+    optionButton.textContent = option.label;
+    secondarySelectionOptions.append(optionButton);
+  });
+}
+
+function clearSecondarySelectionTimer() {
+  window.clearTimeout(state.secondarySelection.scanTimer);
+  state.secondarySelection.scanTimer = 0;
+}
+
+function scheduleSecondarySelectionScan() {
+  clearSecondarySelectionTimer();
+  if (!state.secondarySelection.active) {
+    return;
+  }
+
+  state.secondarySelection.scanTimer = window.setTimeout(() => {
+    const group = getActiveSecondarySelection();
+    if (!group) {
+      renderSecondarySelection();
+      return;
+    }
+
+    advanceSecondarySelection();
+  }, SECONDARY_SELECTION_SCAN_MS);
+}
+
+function advanceSecondarySelection() {
+  const group = activeSecondarySelectionGroup();
+  if (!group) {
+    return;
+  }
+
+  state.secondarySelection.index = (state.secondarySelection.index + 1) % group.options.length;
+  renderSecondarySelection();
+  scheduleSecondarySelectionScan();
+}
+
+function clearSecondarySelection({ render = true } = {}) {
+  clearSecondarySelectionTimer();
+  state.secondarySelection.active = false;
+  state.secondarySelection.groupId = "";
+  state.secondarySelection.index = 0;
+  state.secondarySelection.startedAt = 0;
+  state.secondarySelection.expiresAt = 0;
+  if (render) {
+    renderSecondarySelection();
+  }
+}
+
+function startSecondarySelection(group, action, label = action?.label || group.label) {
+  clearPendingConfirmation();
+  clearSecondarySelection({ render: false });
+  const now = performance.now();
+  state.secondarySelection.active = true;
+  state.secondarySelection.groupId = group.id;
+  state.secondarySelection.index = 0;
+  state.secondarySelection.startedAt = now;
+  state.secondarySelection.expiresAt = now + SECONDARY_SELECTION_TIMEOUT_MS;
+  renderSecondarySelection();
+  scheduleSecondarySelectionScan();
+
+  const actionText = getActionText(action);
+  const prompt = `${actionText}，${group.promptSuffix}`;
+  setCommunicationMessage(prompt, label);
+  speak(prompt);
+  addLog(`${label}：进入二级选择`);
+  finishPendingTestRecord({ text: prompt, label, note: "secondary_selection_started" });
+  return true;
+}
+
+function selectSecondarySelection(index = state.secondarySelection.index, sourceLabel = "短眨选择") {
+  const group = activeSecondarySelectionGroup();
+  if (!group) {
+    return false;
+  }
+
+  const option = group.options[index] || group.options[state.secondarySelection.index];
+  if (!option) {
+    return false;
+  }
+
+  clearSecondarySelection();
+  announce(option.text, `${group.label}：${option.label}`, { shouldSpeak: true });
+  addLog(`${group.label}二级选择：${option.label}（${sourceLabel}）`);
+  return true;
+}
+
+function cancelSecondarySelection({ reason = "cancel", shouldSpeak = true, sourceLabel = "取消" } = {}) {
+  const group = activeSecondarySelectionGroup();
+  if (!group) {
+    return false;
+  }
+
+  clearSecondarySelection();
+  const label = reason === "timeout" ? `${group.label}超时` : `${group.label}：${sourceLabel}`;
+  if (shouldSpeak) {
+    announce("已取消", label, { shouldSpeak: true });
+  } else {
+    setCommunicationMessage("二级选择已取消", label);
+    addLog(`${group.label}二级选择已取消`);
+    finishPendingTestRecord({ text: "二级选择已取消", label });
+  }
+  return true;
+}
+
+function resolveSecondarySelectionBlinkCode(code) {
+  if (!getActiveSecondarySelection()) {
+    return false;
+  }
+
+  if (code === "...") {
+    clearSecondarySelection();
+    addLog("二级选择中收到紧急求助短码，已退出二级选择");
+    return false;
+  }
+
+  if (code === "..") {
+    selectSecondarySelection(undefined, "两次短眨");
+    return true;
+  }
+
+  if (code === ".") {
+    setCommunicationMessage("单次短眨已忽略；两次短眨选择当前项，长闭眼取消。", "二级选择");
+    addLog("二级选择：忽略单次短眨");
+    finishPendingTestRecord({ note: "single_short_blink_ignored_in_secondary_selection" });
+    return true;
+  }
+
+  if (code.includes("-")) {
+    cancelSecondarySelection({ sourceLabel: "长闭眼取消" });
+    return true;
+  }
+
+  setCommunicationMessage(`二级选择中未识别：${displayBlinkCode(code)}`, "二级选择");
+  addLog(`二级选择：未识别短码 ${code}`);
+  finishPendingTestRecord({ note: "unrecognized_code_in_secondary_selection" });
+  return true;
+}
+
 function startActionConfirmation(action, label = action?.label || "") {
   state.pendingConfirmation = {
     label,
@@ -1237,6 +1486,11 @@ function announceAction(action, label = action?.label || "") {
 function executeConfiguredAction(action, label = action?.label || "") {
   if (!action) {
     return false;
+  }
+
+  const secondaryGroup = secondarySelectionGroupForAction(action);
+  if (secondaryGroup) {
+    return startSecondarySelection(secondaryGroup, action, label);
   }
 
   if (action.requiresConfirmation) {
@@ -1622,6 +1876,7 @@ function resetCalibration() {
   clearBlinkCodeBuffer();
   clearSeparatedLongBlink();
   clearPendingConfirmation();
+  clearSecondarySelection();
   resetGestureSequences();
   clearSavedCalibrationProfile();
   state.calibration.active = false;
@@ -2108,6 +2363,10 @@ function decodeBlinkCode() {
     return;
   }
 
+  if (resolveSecondarySelectionBlinkCode(code)) {
+    return;
+  }
+
   if (resolvePendingConfirmation(code)) {
     return;
   }
@@ -2200,6 +2459,7 @@ function pauseRecognition({ preserveMessage = false } = {}) {
   clearBlinkCodeBuffer();
   clearSeparatedLongBlink();
   clearPendingConfirmation();
+  clearSecondarySelection();
   resetGestureSequences();
   resetDetectionWindow();
   pauseRecognitionButton.querySelector("span").textContent = "继续";
@@ -2212,6 +2472,7 @@ function resumeRecognition() {
   state.pausedUntil = 0;
   clearSeparatedLongBlink();
   clearPendingConfirmation();
+  clearSecondarySelection();
   pauseRecognitionButton.querySelector("span").textContent = "暂停";
   setCommunicationMessage("等待输入", "继续");
 }
@@ -2301,6 +2562,15 @@ const gestureDetectors = {
     minHoldMs: 250,
     cooldownMs: 1300,
     releaseMinMs: 90,
+    onTrigger: (event) => handleGestureEvent(event, "抬眉"),
+  }),
+  secondaryBrow: createHoldDetector({
+    name: "BROW_RAISE",
+    threshold: 0.045,
+    peakThreshold: 0.065,
+    minHoldMs: 120,
+    cooldownMs: 900,
+    releaseMinMs: 40,
     onTrigger: (event) => handleGestureEvent(event, "抬眉"),
   }),
   mouth: createHoldDetector({
@@ -2468,6 +2738,9 @@ function handleGestureEvent(event, label) {
   }
 
   if (event.name === "BROW_RAISE") {
+    if (selectSecondarySelection(undefined, label)) {
+      return;
+    }
     if (confirmPendingGesture(label)) {
       return;
     }
@@ -2477,6 +2750,13 @@ function handleGestureEvent(event, label) {
   }
 
   if (event.name === "MOUTH_OPEN") {
+    if (getActiveSecondarySelection()) {
+      setCommunicationMessage("二级选择中：请用两次短眨或抬眉选择，长闭眼或摇头取消。", "二级选择");
+      addLog("二级选择中忽略张嘴动作");
+      finishPendingTestRecord({ note: "mouth_ignored_during_secondary_selection" });
+      return;
+    }
+
     const now = performance.now();
     const action = getActionConfigByGestureId(EVENT_GESTURE_IDS.MOUTH_DOUBLE_OPEN);
     state.gestureSequences.mouthOpenTimes = state.gestureSequences.mouthOpenTimes.filter(
@@ -2498,11 +2778,21 @@ function handleGestureEvent(event, label) {
   }
 
   if (event.name === "SMILE") {
+    if (getActiveSecondarySelection()) {
+      setCommunicationMessage("二级选择中：请用两次短眨或抬眉选择，长闭眼或摇头取消。", "二级选择");
+      addLog("二级选择中忽略微笑动作");
+      finishPendingTestRecord({ note: "smile_ignored_during_secondary_selection" });
+      return;
+    }
+
     handleSmileGesture(event, label);
     return;
   }
 
   if (event.name === "HEAD_SHAKE") {
+    if (cancelSecondarySelection({ sourceLabel: label })) {
+      return;
+    }
     if (cancelPendingGesture(label)) {
       return;
     }
@@ -2994,6 +3284,7 @@ async function startCamera(deviceId = state.selectedDeviceId) {
     resetDetectionWindow();
     clearBlinkCodeBuffer();
     clearPendingConfirmation();
+    clearSecondarySelection();
     resetGestureSequences();
     resetSignalBaseline();
     resetLiveMetrics("检测中");
@@ -3046,6 +3337,7 @@ function stopCamera(clearStatus = true) {
     resetDetectionWindow();
     clearBlinkCodeBuffer();
     clearPendingConfirmation();
+    clearSecondarySelection();
     resetGestureSequences();
     resetLiveMetrics("已停止");
     addLog("检测已停止");
@@ -3176,6 +3468,7 @@ function processFaceSignals(signals, now) {
     resetDetectionWindow();
     resetGestureSequences();
     gestureDetectors.brow.reset();
+    gestureDetectors.secondaryBrow.reset();
     gestureDetectors.mouth.reset();
     gestureDetectors.smile.reset();
     headShakeDetector.reset();
@@ -3192,6 +3485,7 @@ function processFaceSignals(signals, now) {
     resetDetectionWindow();
     resetGestureSequences();
     gestureDetectors.brow.reset();
+    gestureDetectors.secondaryBrow.reset();
     gestureDetectors.mouth.reset();
     gestureDetectors.smile.reset();
     headShakeDetector.reset();
@@ -3210,6 +3504,7 @@ function processFaceSignals(signals, now) {
     resetDetectionWindow();
     resetGestureSequences();
     gestureDetectors.brow.reset();
+    gestureDetectors.secondaryBrow.reset();
     gestureDetectors.mouth.reset();
     gestureDetectors.smile.reset();
     headShakeDetector.reset();
@@ -3261,6 +3556,7 @@ function processFaceSignals(signals, now) {
     lastGesture.textContent = "画面稳定中";
     resetGestureSequences();
     gestureDetectors.brow.reset();
+    gestureDetectors.secondaryBrow.reset();
     gestureDetectors.mouth.reset();
     gestureDetectors.smile.reset();
     headShakeDetector.reset();
@@ -3270,6 +3566,7 @@ function processFaceSignals(signals, now) {
   const mouthLooksActive = detectionSignals.mouthOpen >= MOUTH_SMILE_SUPPRESS_THRESHOLD;
   const smileLooksActive = smileToggle.checked && detectionSignals.smile >= SMILE_MOUTH_SUPPRESS_THRESHOLD;
   const headMotionSuppressesBrow = isHeadMotionSuppressingBrow(signals, detectionSignals, now);
+  const secondarySelectionActive = Boolean(getActiveSecondarySelection(now));
 
   gestureDetectors.mouth.update(
     smileLooksActive && !mouthLooksActive ? 0 : detectionSignals.mouthOpen,
@@ -3277,14 +3574,20 @@ function processFaceSignals(signals, now) {
     mouthToggle.checked,
   );
 
-  if (headMotionSuppressesBrow) {
+  if (secondarySelectionActive) {
+    gestureDetectors.brow.reset();
+    gestureDetectors.secondaryBrow.update(detectionSignals.browUp, now, browToggle.checked);
+  } else if (headMotionSuppressesBrow) {
     if (browToggle.checked) {
       lastGesture.textContent = "点头中，抬眉暂停";
     }
     gestureDetectors.brow.reset();
+    gestureDetectors.secondaryBrow.reset();
   } else if (detectionSignals.mouthOpen >= MOUTH_BROW_SUPPRESS_THRESHOLD) {
     gestureDetectors.brow.reset();
+    gestureDetectors.secondaryBrow.reset();
   } else {
+    gestureDetectors.secondaryBrow.reset();
     gestureDetectors.brow.update(detectionSignals.browUp, now, browToggle.checked);
   }
 
@@ -3400,6 +3703,7 @@ function resetCounters() {
   resetDetectionWindow();
   clearBlinkCodeBuffer();
   clearPendingConfirmation();
+  clearSecondarySelection();
   resetGestureSequences();
   blinkCount.textContent = "0";
   blinkState.textContent = state.running ? "检测中" : "未检测";
@@ -3439,10 +3743,32 @@ repeatSpeechButton.addEventListener("click", () => {
   speak();
 });
 
+secondarySelectionOptions?.addEventListener("click", (event) => {
+  if (!(event.target instanceof Element)) {
+    return;
+  }
+
+  const optionButton = event.target.closest("button[data-index]");
+  if (!optionButton) {
+    return;
+  }
+
+  selectSecondarySelection(Number(optionButton.dataset.index), "手动点击");
+});
+
+secondarySelectionSelectButton?.addEventListener("click", () => {
+  selectSecondarySelection(undefined, "手动点击");
+});
+
+secondarySelectionCancelButton?.addEventListener("click", () => {
+  cancelSecondarySelection({ sourceLabel: "手动取消" });
+});
+
 clearSpeechButton.addEventListener("click", () => {
   cancelSpeech();
   clearBlinkCodeBuffer();
   clearPendingConfirmation();
+  clearSecondarySelection();
   resetGestureSequences();
   setCommunicationMessage("等待输入", "--");
 });
@@ -3450,11 +3776,13 @@ clearSpeechButton.addEventListener("click", () => {
 blinkCodeToggle.addEventListener("change", () => {
   clearBlinkCodeBuffer();
   clearSeparatedLongBlink();
+  clearSecondarySelection();
   updateActionGuide();
 });
 
 [browToggle, mouthToggle, smileToggle, headShakeToggle].forEach((toggle) => {
   toggle.addEventListener("change", () => {
+    clearSecondarySelection();
     resetGestureSequences();
     updateActionGuide();
   });
