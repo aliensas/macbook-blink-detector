@@ -12,6 +12,7 @@
 - `docs/v0.4-action-config.md`：v0.4 高级设置配置结构，限定为只自定义显示和播报文字。
 - `docs/v0.3-test-checklist.md`：当前 Mac 本地版动作测试清单。
 - `docs/desktop-distribution.md`：Mac 桌面应用打包、分发和验证说明。
+- `docs/ios/v0.2-ios-current-plan.md`：iPhone / iOS 版本基于当前 Mac 稳定版的迁移计划。
 
 ## 当前定位
 
