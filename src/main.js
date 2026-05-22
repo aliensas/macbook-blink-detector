@@ -64,6 +64,7 @@ const browToggle = document.querySelector("#browToggle");
 const mouthToggle = document.querySelector("#mouthToggle");
 const smileToggle = document.querySelector("#smileToggle");
 const headShakeToggle = document.querySelector("#headShakeToggle");
+const inputManagementButton = document.querySelector("#inputManagementButton");
 const lastGesture = document.querySelector("#lastGesture");
 const browMeter = document.querySelector("#browMeter");
 const browValue = document.querySelector("#browValue");
@@ -166,6 +167,7 @@ const BLINK_SYMBOLS = {
   decodeDelayMs: 1200,
   closedDeferMs: 120,
   finalDecodeDelayMs: 350,
+  inputManagementContinuationMs: 1600,
   longSequenceDecodeDelayMs: 2200,
   separatedLongWindowMs: 6000,
 };
@@ -269,7 +271,7 @@ const DEFAULT_ACTION_CONFIG = [
     label: "微笑",
     displayText: "谢谢，可以，我还好",
     speechText: "谢谢，可以，我还好",
-    instruction: "轻微闭嘴微笑约 0.25 秒后放松；只有明显张嘴时才会抑制微笑。",
+    instruction: "轻微闭嘴微笑约 0.25 秒后放松；明显张嘴或左右方向切换的摇头会短暂暂停微笑判断。",
     category: "emotion",
     input: "smile",
     enabled: true,
@@ -311,6 +313,7 @@ const BLINK_CODE_GESTURE_IDS = {
   "--": "blink_double_long",
   ".-": "blink_short_long",
   "-.": "blink_long_short",
+  "--.": "input_management",
 };
 const EVENT_GESTURE_IDS = {
   BROW_RAISE: "brow_raise",
@@ -355,6 +358,26 @@ const SECONDARY_SELECTION_GROUPS = {
       { id: "position_legs", label: "调整腿脚", text: "请帮我调整腿部或脚的位置" },
     ],
   },
+  inputChannels: {
+    id: "inputChannels",
+    label: "输入管理",
+    title: "输入管理：选择识别通道",
+    hint: "自动轮流高亮；两次短眨或抬眉选择，长闭眼退出。眨眼始终开启。",
+    options: [
+      { id: "blink_only", type: "blinkOnly" },
+      { id: "toggle_brow", type: "toggleInput", channel: "brow", label: "抬眉", onText: "抬眉识别已开启", offText: "抬眉识别已关闭" },
+      { id: "toggle_mouth", type: "toggleInput", channel: "mouth", label: "张嘴", onText: "张嘴识别已开启", offText: "张嘴识别已关闭" },
+      { id: "toggle_smile", type: "toggleInput", channel: "smile", label: "微笑", onText: "微笑识别已开启", offText: "微笑识别已关闭" },
+      { id: "toggle_head", type: "toggleInput", channel: "head", label: "摇头", onText: "摇头识别已开启", offText: "摇头识别已关闭" },
+      { id: "exit", type: "exit", label: "退出" },
+    ],
+  },
+};
+const OPTIONAL_INPUT_CHANNELS = {
+  brow: { toggle: browToggle, label: "抬眉" },
+  mouth: { toggle: mouthToggle, label: "张嘴" },
+  smile: { toggle: smileToggle, label: "微笑" },
+  head: { toggle: headShakeToggle, label: "摇头" },
 };
 const CONFIRMATION_TIMEOUT_MS = 10 * 1000;
 const MOUTH_DOUBLE_WINDOW_MS = 6000;
@@ -365,6 +388,9 @@ const SMILE_DOUBLE_WINDOW_MS = 2400;
 const SMILE_DOUBLE_MIN_GAP_MS = 550;
 const SMILE_WIDTH_DELTA_SCALE = 0.055;
 const HEAD_SHAKE_YAW_THRESHOLD = 0.022;
+const SMILE_HEAD_MOTION_GUARD = {
+  settleMs: 500,
+};
 const BROW_HEAD_MOTION_GUARD = {
   pitchDelta: 0.03,
   pitchJump: 0.012,
@@ -378,6 +404,7 @@ const FACE_SCALE_STABILITY = {
 };
 const CALIBRATION_STORAGE_KEY = "alsFacialAac.defaultPatientCalibration.v1";
 const ACTION_TEXT_STORAGE_KEY = "alsFacialAac.actionText.v1";
+const INPUT_CHANNEL_STORAGE_KEY = "alsFacialAac.inputChannels.v1";
 const LEGACY_ACTION_CONFIG_STORAGE_KEYS = ["alsFacialAac.actionConfig.v2"];
 const CALIBRATION_STEPS = [
   {
@@ -425,7 +452,7 @@ const CALIBRATION_STEPS = [
     kind: "test",
   },
 ];
-const GUIDED_TEST_CODES = [".", "-", "..", "...", "--", ".-", "-."];
+const GUIDED_TEST_CODES = [".", "-", "..", "...", "--", ".-", "-.", "--."];
 
 const state = {
   faceLandmarker: null,
@@ -481,6 +508,9 @@ const state = {
     lastPitch: null,
     lastCenterY: null,
     browBlockedUntil: 0,
+  },
+  smileHeadMotionGuard: {
+    smileBlockedUntil: 0,
   },
   gestureSequences: {
     mouthOpenTimes: [],
@@ -887,10 +917,15 @@ function resetSignalBaseline() {
   state.headMotionGuard.lastPitch = null;
   state.headMotionGuard.lastCenterY = null;
   state.headMotionGuard.browBlockedUntil = 0;
+  state.smileHeadMotionGuard.smileBlockedUntil = 0;
 }
 
 function resetGestureSequences() {
   state.gestureSequences.mouthOpenTimes = [];
+  resetSmileSequence();
+}
+
+function resetSmileSequence() {
   if (state.gestureSequences.smileTimer) {
     window.clearTimeout(state.gestureSequences.smileTimer);
   }
@@ -1202,13 +1237,90 @@ async function importActionTextConfig(file) {
   }
 }
 
+function forceBlinkCodeEnabled() {
+  blinkCodeToggle.checked = true;
+}
+
+function resetOptionalGestureState() {
+  resetGestureSequences();
+  gestureDetectors.brow.reset();
+  gestureDetectors.secondaryBrow.reset();
+  gestureDetectors.mouth.reset();
+  gestureDetectors.smile.reset();
+  headShakeDetector.reset();
+}
+
+function saveInputChannelConfig({ silent = false } = {}) {
+  forceBlinkCodeEnabled();
+  const payload = Object.fromEntries(
+    Object.entries(OPTIONAL_INPUT_CHANNELS).map(([channel, config]) => [channel, Boolean(config.toggle.checked)]),
+  );
+
+  try {
+    window.localStorage.setItem(INPUT_CHANNEL_STORAGE_KEY, JSON.stringify(payload, null, 2));
+    if (!silent) {
+      addLog("输入通道设置已保存");
+    }
+    return true;
+  } catch {
+    if (!silent) {
+      addLog("输入通道设置保存失败");
+    }
+    return false;
+  }
+}
+
+function loadSavedInputChannelConfig() {
+  forceBlinkCodeEnabled();
+  try {
+    const raw = window.localStorage.getItem(INPUT_CHANNEL_STORAGE_KEY);
+    const saved = raw ? JSON.parse(raw) : {};
+    Object.entries(OPTIONAL_INPUT_CHANNELS).forEach(([channel, config]) => {
+      config.toggle.checked = Boolean(saved[channel]);
+    });
+    return true;
+  } catch {
+    Object.values(OPTIONAL_INPUT_CHANNELS).forEach((config) => {
+      config.toggle.checked = false;
+    });
+    addLog("输入通道设置读取失败，已切换为仅眨眼");
+    return false;
+  }
+}
+
+function setOptionalInputChannel(channel, enabled, { save = true } = {}) {
+  const config = OPTIONAL_INPUT_CHANNELS[channel];
+  if (!config) {
+    return false;
+  }
+
+  config.toggle.checked = Boolean(enabled);
+  resetOptionalGestureState();
+  updateActionGuide();
+  if (save) {
+    saveInputChannelConfig({ silent: true });
+  }
+  return true;
+}
+
+function setOnlyBlinkInput({ save = true } = {}) {
+  forceBlinkCodeEnabled();
+  Object.keys(OPTIONAL_INPUT_CHANNELS).forEach((channel) => {
+    setOptionalInputChannel(channel, false, { save: false });
+  });
+  updateActionGuide();
+  if (save) {
+    saveInputChannelConfig({ silent: true });
+  }
+}
+
 function isActionGuideVisible(action) {
   if (!action.enabled) {
     return false;
   }
 
   if (action.input === "blink") {
-    return blinkCodeToggle.checked;
+    return true;
   }
 
   if (action.input === "brow") {
@@ -1303,6 +1415,23 @@ function activeSecondarySelectionGroup() {
   return selection ? SECONDARY_SELECTION_GROUPS[selection.groupId] || null : null;
 }
 
+function secondarySelectionOptionLabel(group, option) {
+  if (group.id !== "inputChannels") {
+    return option.label;
+  }
+
+  if (option.type === "blinkOnly") {
+    return "仅用眨眼";
+  }
+
+  if (option.type === "toggleInput") {
+    const checked = Boolean(OPTIONAL_INPUT_CHANNELS[option.channel]?.toggle.checked);
+    return `${option.label}：${checked ? "开启" : "关闭"}`;
+  }
+
+  return option.label || "退出";
+}
+
 function renderSecondarySelection() {
   const group = activeSecondarySelectionGroup();
   if (!secondarySelectionPanel || !secondarySelectionOptions) {
@@ -1325,7 +1454,7 @@ function renderSecondarySelection() {
     optionButton.className = `secondary-selection-option${index === state.secondarySelection.index ? " is-active" : ""}`;
     optionButton.type = "button";
     optionButton.dataset.index = String(index);
-    optionButton.textContent = option.label;
+    optionButton.textContent = secondarySelectionOptionLabel(group, option);
     secondarySelectionOptions.append(optionButton);
   });
 }
@@ -1396,6 +1525,68 @@ function startSecondarySelection(group, action, label = action?.label || group.l
   return true;
 }
 
+function startInputManagementSelection() {
+  const group = SECONDARY_SELECTION_GROUPS.inputChannels;
+  clearPendingConfirmation();
+  clearSeparatedLongBlink();
+  clearSecondarySelection({ render: false });
+  forceBlinkCodeEnabled();
+
+  const now = performance.now();
+  state.secondarySelection.active = true;
+  state.secondarySelection.groupId = group.id;
+  state.secondarySelection.index = 0;
+  state.secondarySelection.startedAt = now;
+  state.secondarySelection.expiresAt = now + SECONDARY_SELECTION_TIMEOUT_MS;
+  renderSecondarySelection();
+  scheduleSecondarySelectionScan();
+
+  const prompt = "输入管理：请选择要开启或关闭的动作。眨眼短码始终开启。";
+  setCommunicationMessage(prompt, group.label);
+  speak(prompt);
+  addLog("进入输入管理");
+  return true;
+}
+
+function selectInputManagementOption(option, sourceLabel = "短眨选择") {
+  const group = SECONDARY_SELECTION_GROUPS.inputChannels;
+  if (!option) {
+    return false;
+  }
+
+  if (option.type === "exit") {
+    clearSecondarySelection();
+    announce("已退出输入管理", group.label, { shouldSpeak: true });
+    addLog(`输入管理已退出（${sourceLabel}）`);
+    return true;
+  }
+
+  let text = "";
+  if (option.type === "blinkOnly") {
+    setOnlyBlinkInput();
+    text = "已切换为仅用眨眼";
+  } else if (option.type === "toggleInput") {
+    const config = OPTIONAL_INPUT_CHANNELS[option.channel];
+    if (!config) {
+      return false;
+    }
+    const nextChecked = !config.toggle.checked;
+    setOptionalInputChannel(option.channel, nextChecked);
+    text = nextChecked ? option.onText : option.offText;
+  }
+
+  if (!text) {
+    return false;
+  }
+
+  clearSecondarySelectionTimer();
+  renderSecondarySelection();
+  scheduleSecondarySelectionScan();
+  announce(text, group.label, { shouldSpeak: true });
+  addLog(`输入管理：${text}（${sourceLabel}）`);
+  return true;
+}
+
 function selectSecondarySelection(index = state.secondarySelection.index, sourceLabel = "短眨选择") {
   const group = activeSecondarySelectionGroup();
   if (!group) {
@@ -1405,6 +1596,10 @@ function selectSecondarySelection(index = state.secondarySelection.index, source
   const option = group.options[index] || group.options[state.secondarySelection.index];
   if (!option) {
     return false;
+  }
+
+  if (group.id === "inputChannels") {
+    return selectInputManagementOption(option, sourceLabel);
   }
 
   clearSecondarySelection();
@@ -1420,6 +1615,18 @@ function cancelSecondarySelection({ reason = "cancel", shouldSpeak = true, sourc
   }
 
   clearSecondarySelection();
+  if (group.id === "inputChannels") {
+    const text = "已退出输入管理";
+    if (shouldSpeak) {
+      announce(text, group.label, { shouldSpeak: true });
+    } else {
+      setCommunicationMessage(text, group.label);
+      addLog("输入管理已退出");
+      finishPendingTestRecord({ text, label: group.label });
+    }
+    return true;
+  }
+
   const label = reason === "timeout" ? `${group.label}超时` : `${group.label}：${sourceLabel}`;
   if (shouldSpeak) {
     announce("已取消", label, { shouldSpeak: true });
@@ -2148,6 +2355,44 @@ function recordGuidedTestCode(
   }
 
   const expected = state.calibration.activeTestCode;
+  if (expected === "--." && code === "-" && !overflowed) {
+    const firstLongAt = Number.isFinite(decodedAt)
+      ? decodedAt
+      : Number.isFinite(actionEndedAt)
+        ? actionEndedAt
+        : performance.now();
+    state.calibration.guidedRestFirstLongAt = firstLongAt;
+    updatePendingTestRecord({
+      expected,
+      received: "-",
+      correct: null,
+      note: "guided_test_waiting_second_long_and_short_blink",
+    });
+    guidedTestStatus.textContent = "已收到第一次长闭眼，请继续做第二次长闭眼，再在约 1.6 秒内短眨。";
+    addLog("输入管理短码测试：已收到第一次长闭眼，等待第二次长闭眼和短眨");
+    finishPendingTestRecord();
+    updateCalibrationUI();
+    return true;
+  }
+
+  if (expected === "--." && code === "-." && !overflowed) {
+    const secondLongAt = Number.isFinite(actionStartedAt)
+      ? actionStartedAt
+      : Number.isFinite(decodedAt)
+        ? decodedAt
+        : performance.now();
+    const hasFirstLong =
+      state.calibration.guidedRestFirstLongAt &&
+      secondLongAt - state.calibration.guidedRestFirstLongAt <= BLINK_SYMBOLS.separatedLongWindowMs;
+
+    state.calibration.guidedRestFirstLongAt = 0;
+    if (hasFirstLong) {
+      code = "--.";
+    }
+  } else if (expected !== "--") {
+    state.calibration.guidedRestFirstLongAt = 0;
+  }
+
   if (expected === "--" && code === "-" && !overflowed) {
     const firstLongAt = Number.isFinite(decodedAt)
       ? decodedAt
@@ -2176,7 +2421,7 @@ function recordGuidedTestCode(
 
     state.calibration.guidedRestFirstLongAt = 0;
     code = "--";
-  } else {
+  } else if (expected === "--") {
     state.calibration.guidedRestFirstLongAt = 0;
   }
 
@@ -2281,6 +2526,44 @@ function resolveSeparatedLongBlinkRest({ code, actionStartedAt = null, actionEnd
   const action = getActionConfigByGestureId(BLINK_CODE_GESTURE_IDS["--"]);
   executeConfiguredAction(action, action?.label || `短码 ${displayBlinkCode("--")}`);
   return true;
+}
+
+function openInputManagementFromBlinkCode({ note = "input_management_started" } = {}) {
+  clearSeparatedLongBlink();
+  if (!hasConfirmedCalibration()) {
+    setCommunicationMessage("输入管理短码已识别；完成并确认引导校准后才打开菜单。", "未确认");
+    addLog("输入管理短码已识别，因引导校准未确认而未打开");
+    finishPendingTestRecord({ note: "calibration_not_confirmed" });
+    return true;
+  }
+
+  startInputManagementSelection();
+  finishPendingTestRecord({ text: "进入输入管理", label: "输入管理", note });
+  return true;
+}
+
+function resolveSeparatedLongInputManagement({ code, actionStartedAt = null, decodedAt = null } = {}) {
+  if (code !== "-." || !state.pendingSeparatedLongAt) {
+    return false;
+  }
+
+  const secondLongAt = Number.isFinite(actionStartedAt)
+    ? actionStartedAt
+    : Number.isFinite(decodedAt)
+      ? decodedAt
+      : performance.now();
+  const hasFirstLong = secondLongAt - state.pendingSeparatedLongAt <= BLINK_SYMBOLS.separatedLongWindowMs;
+
+  if (!hasFirstLong) {
+    return false;
+  }
+
+  updatePendingTestRecord({
+    code: "--.",
+    received: "--.",
+    label: `短码 ${displayBlinkCode("--.")}`,
+  });
+  return openInputManagementFromBlinkCode({ note: "input_management_started_after_separated_long" });
 }
 
 function resolvePendingConfirmation(code) {
@@ -2388,7 +2671,16 @@ function decodeBlinkCode() {
     return;
   }
 
+  if (resolveSeparatedLongInputManagement({ code, actionStartedAt, decodedAt })) {
+    return;
+  }
+
   const gestureId = BLINK_CODE_GESTURE_IDS[code];
+  if (gestureId === "input_management") {
+    openInputManagementFromBlinkCode();
+    return;
+  }
+
   const action = getActionConfigByGestureId(gestureId);
   if (action) {
     clearSeparatedLongBlink();
@@ -2409,7 +2701,8 @@ function decodeBlinkCode() {
 }
 
 function enqueueBlinkSymbol(symbol, meta = {}) {
-  if (!blinkCodeToggle.checked || isRecognitionPaused(performance.now())) {
+  forceBlinkCodeEnabled();
+  if (isRecognitionPaused(performance.now())) {
     return;
   }
 
@@ -2448,6 +2741,10 @@ function getBlinkDecodeDelay() {
   }
 
   if (BLINK_CODE_GESTURE_IDS[code]) {
+    if (code === "--") {
+      return BLINK_SYMBOLS.inputManagementContinuationMs;
+    }
+
     return code === ".." ? BLINK_SYMBOLS.decodeDelayMs : BLINK_SYMBOLS.finalDecodeDelayMs;
   }
 
@@ -2598,10 +2895,17 @@ const headShakeDetector = {
   changeCount: 0,
   windowStartedAt: 0,
   lastTriggerAt: 0,
-  reset() {
+  motionUntil: 0,
+  reset({ clearMotion = true } = {}) {
     this.direction = "";
     this.changeCount = 0;
     this.windowStartedAt = 0;
+    if (clearMotion) {
+      this.motionUntil = 0;
+    }
+  },
+  isTracking(now) {
+    return now < this.motionUntil;
   },
   update(yaw, now, enabled) {
     if (!enabled || isRecognitionPaused(now)) {
@@ -2626,13 +2930,15 @@ const headShakeDetector = {
     if (direction !== this.direction) {
       this.direction = direction;
       this.changeCount += 1;
+      this.motionUntil = now + SMILE_HEAD_MOTION_GUARD.settleMs;
     }
 
     if (this.changeCount >= 2 && now - this.windowStartedAt <= 4000 && now - this.lastTriggerAt >= 1000) {
       const duration = now - this.windowStartedAt;
       const peakValue = Math.abs(yaw);
       this.lastTriggerAt = now;
-      this.reset();
+      this.motionUntil = now + SMILE_HEAD_MOTION_GUARD.settleMs;
+      this.reset({ clearMotion: false });
       handleGestureEvent({ name: "HEAD_SHAKE", duration, value: peakValue }, "摇头");
     }
 
@@ -2790,6 +3096,14 @@ function handleGestureEvent(event, label) {
   }
 
   if (event.name === "HEAD_SHAKE") {
+    const activeGroup = activeSecondarySelectionGroup();
+    if (activeGroup?.id === "inputChannels") {
+      lastGesture.textContent = "输入管理中忽略摇头";
+      addLog("输入管理中忽略摇头动作，避免刚开启摇头时误退出");
+      finishPendingTestRecord({ note: "head_shake_ignored_during_input_management" });
+      return;
+    }
+
     if (cancelSecondarySelection({ sourceLabel: label })) {
       return;
     }
@@ -3057,6 +3371,21 @@ function isHeadMotionSuppressingBrow(signals, detectionSignals, now) {
   }
 
   return now < guard.browBlockedUntil;
+}
+
+function isHeadMotionSuppressingSmile(now) {
+  const guard = state.smileHeadMotionGuard;
+
+  if (!smileToggle.checked || !headShakeToggle.checked) {
+    guard.smileBlockedUntil = 0;
+    return false;
+  }
+
+  if (headShakeDetector.isTracking(now)) {
+    guard.smileBlockedUntil = now + SMILE_HEAD_MOTION_GUARD.settleMs;
+  }
+
+  return now < guard.smileBlockedUntil;
 }
 
 function chooseBuiltInCamera(devices) {
@@ -3568,6 +3897,9 @@ function processFaceSignals(signals, now) {
   const headMotionSuppressesBrow = isHeadMotionSuppressingBrow(signals, detectionSignals, now);
   const secondarySelectionActive = Boolean(getActiveSecondarySelection(now));
 
+  headShakeDetector.update(detectionSignals.headYaw, now, headShakeToggle.checked);
+  const headMotionSuppressesSmile = isHeadMotionSuppressingSmile(now);
+
   gestureDetectors.mouth.update(
     smileLooksActive && !mouthLooksActive ? 0 : detectionSignals.mouthOpen,
     now,
@@ -3591,8 +3923,15 @@ function processFaceSignals(signals, now) {
     gestureDetectors.brow.update(detectionSignals.browUp, now, browToggle.checked);
   }
 
-  gestureDetectors.smile.update(mouthLooksActive ? 0 : detectionSignals.smile, now, smileToggle.checked);
-  headShakeDetector.update(detectionSignals.headYaw, now, headShakeToggle.checked);
+  if (headMotionSuppressesSmile) {
+    if (smileToggle.checked && now - headShakeDetector.lastTriggerAt > 250) {
+      lastGesture.textContent = "摇头中，微笑暂停";
+    }
+    resetSmileSequence();
+    gestureDetectors.smile.reset();
+  } else {
+    gestureDetectors.smile.update(mouthLooksActive ? 0 : detectionSignals.smile, now, smileToggle.checked);
+  }
 }
 
 function handleBlinkReleased(now, ear) {
@@ -3774,6 +4113,7 @@ clearSpeechButton.addEventListener("click", () => {
 });
 
 blinkCodeToggle.addEventListener("change", () => {
+  forceBlinkCodeEnabled();
   clearBlinkCodeBuffer();
   clearSeparatedLongBlink();
   clearSecondarySelection();
@@ -3783,10 +4123,13 @@ blinkCodeToggle.addEventListener("change", () => {
 [browToggle, mouthToggle, smileToggle, headShakeToggle].forEach((toggle) => {
   toggle.addEventListener("change", () => {
     clearSecondarySelection();
-    resetGestureSequences();
+    resetOptionalGestureState();
+    saveInputChannelConfig({ silent: true });
     updateActionGuide();
   });
 });
+
+inputManagementButton?.addEventListener("click", startInputManagementSelection);
 
 actionSettingsList?.addEventListener("input", (event) => {
   const input = event.target;
@@ -3919,6 +4262,7 @@ refreshCameraList().catch(() => {
   cameraSelect.append(option);
 });
 
+loadSavedInputChannelConfig();
 loadSavedActionTextConfig();
 renderActionSettings();
 updateActionGuide();

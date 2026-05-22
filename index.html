@@ -174,12 +174,15 @@
           <div class="control-group">
             <label>输入</label>
             <div class="toggle-grid">
-              <label><input id="blinkCodeToggle" type="checkbox" checked />眨眼短码</label>
+              <label class="input-channel-fixed"><input id="blinkCodeToggle" type="checkbox" checked disabled />眨眼短码 始终开启</label>
               <label><input id="browToggle" type="checkbox" />抬眉 是/确认</label>
               <label><input id="mouthToggle" type="checkbox" />张嘴两次吸痰</label>
               <label><input id="headShakeToggle" type="checkbox" />摇头 否/取消</label>
               <label><input id="smileToggle" type="checkbox" />微笑表达</label>
             </div>
+            <button class="ghost-action compact-action input-management-button" id="inputManagementButton" type="button">
+              输入管理
+            </button>
           </div>
 
           <div class="action-guide" aria-label="当前动作说明">
@@ -262,6 +265,7 @@
                   <option value="--">两次长闭眼：校准后我想休息（6 秒内）</option>
                   <option value=".-">短眨+长闭眼：校准后挠痒痒</option>
                   <option value="-.">长闭眼+短眨：校准后调整体位</option>
+                  <option value="--.">长闭眼+长闭眼+短眨：校准后输入管理</option>
                 </select>
                 <button class="ghost-action compact-action" id="guidedTestButton" type="button">测试</button>
               </div>

@@ -884,6 +884,15 @@ input[type="range"] {
   display: none;
 }
 
+.toggle-grid .input-channel-fixed {
+  cursor: default;
+}
+
+.input-management-button {
+  width: 100%;
+  margin-top: 10px;
+}
+
 /* ── Action Guide ───────────────────────────────────────── */
 .action-guide {
   display: grid;
