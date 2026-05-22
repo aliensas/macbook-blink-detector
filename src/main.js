@@ -119,6 +119,41 @@ const ENGINEERING_MODE = new URLSearchParams(window.location.search).has("debug"
 const LANGUAGE_STORAGE_KEY = "alsFacialAac.uiLanguage.v1";
 
 const SUPPORTED_LANGUAGES = ["zh", "en"];
+const ENGLISH_VOICE_PRIORITY = [
+  "Samantha",
+  "Alex",
+  "Google US English",
+  "Microsoft Aria",
+  "Microsoft Jenny",
+  "Daniel",
+  "Karen",
+  "Moira",
+  "Tessa",
+  "Victoria",
+  "Fiona",
+  "Allison",
+];
+const AVOIDED_SPEECH_VOICE_PATTERNS = [
+  /albert/i,
+  /bad news/i,
+  /bahh/i,
+  /bells/i,
+  /boing/i,
+  /bubbles/i,
+  /cellos/i,
+  /deranged/i,
+  /fred/i,
+  /hysterical/i,
+  /jester/i,
+  /organ/i,
+  /pipe/i,
+  /princess/i,
+  /ralph/i,
+  /superstar/i,
+  /trinoids/i,
+  /whisper/i,
+  /zarvox/i,
+];
 
 function normalizeLanguage(value) {
   return SUPPORTED_LANGUAGES.includes(value) ? value : "zh";
@@ -1008,6 +1043,7 @@ const EVENT_GESTURE_IDS = {
 };
 const SECONDARY_SELECTION_SCAN_MS = 3220;
 const SECONDARY_SELECTION_TIMEOUT_MS = 90 * 1000;
+const CONSUMED_BLINK_CODE_SUPPRESS_MS = 1800;
 const SECONDARY_SELECTION_GROUPS = {
   scratch: {
     id: "scratch",
@@ -1277,6 +1313,11 @@ const state = {
     startedAt: 0,
     expiresAt: 0,
     scanTimer: 0,
+  },
+  recentlyConsumedBlinkCode: {
+    code: "",
+    until: 0,
+    reason: "",
   },
   fpsSamples: [],
   lastFps: null,
@@ -2293,6 +2334,27 @@ function clearSecondarySelectionTimer() {
   state.secondarySelection.scanTimer = 0;
 }
 
+function rememberConsumedBlinkCode(code, reason = "") {
+  state.recentlyConsumedBlinkCode.code = code;
+  state.recentlyConsumedBlinkCode.until = performance.now() + CONSUMED_BLINK_CODE_SUPPRESS_MS;
+  state.recentlyConsumedBlinkCode.reason = reason;
+}
+
+function shouldSuppressRecentlyConsumedBlinkCode(code, now = performance.now()) {
+  const consumed = state.recentlyConsumedBlinkCode;
+  if (!consumed.code || consumed.code !== code || now > consumed.until) {
+    return false;
+  }
+
+  addLog(
+    currentLanguage === "en"
+      ? `Suppressed repeated consumed blink code ${displayBlinkCode(code)}`
+      : `已抑制已被场景消费的重复短码 ${displayBlinkCode(code)}`,
+  );
+  finishPendingTestRecord({ note: consumed.reason || "consumed_blink_code_suppressed" });
+  return true;
+}
+
 function scheduleSecondarySelectionScan() {
   clearSecondarySelectionTimer();
   if (!state.secondarySelection.active) {
@@ -2486,7 +2548,9 @@ function resolveSecondarySelectionBlinkCode(code) {
   }
 
   if (code === "..") {
-    selectSecondarySelection(undefined, currentLanguage === "en" ? "two short blinks" : "两次短眨");
+    if (selectSecondarySelection(undefined, currentLanguage === "en" ? "two short blinks" : "两次短眨")) {
+      rememberConsumedBlinkCode(code, "secondary_selection_select");
+    }
     return true;
   }
 
@@ -2582,6 +2646,70 @@ function cancelSpeech() {
   }
 }
 
+function englishSpeechVoiceScore(voice, lang) {
+  const normalizedName = voice.name || "";
+  const normalizedLang = (voice.lang || "").toLowerCase();
+  const targetLang = lang.toLowerCase();
+
+  if (AVOIDED_SPEECH_VOICE_PATTERNS.some((pattern) => pattern.test(normalizedName))) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  let score = 0;
+  if (normalizedLang === targetLang) {
+    score += 0;
+  } else if (normalizedLang.startsWith("en-") || normalizedLang === "en") {
+    score += 50;
+  } else {
+    score += 1000;
+  }
+
+  const priorityIndex = ENGLISH_VOICE_PRIORITY.findIndex((name) =>
+    normalizedName.toLowerCase().includes(name.toLowerCase()),
+  );
+  score += priorityIndex >= 0 ? priorityIndex * 2 : 80;
+
+  if (voice.localService) {
+    score -= 4;
+  }
+
+  if (voice.default) {
+    score += 6;
+  }
+
+  return score;
+}
+
+function preferredEnglishSpeechVoice(lang = t("speechLang")) {
+  if (!("speechSynthesis" in window)) {
+    return null;
+  }
+
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) {
+    return null;
+  }
+
+  const candidates = voices.filter((voice) => (voice.lang || "").toLowerCase().startsWith("en"));
+  const sorted = (candidates.length ? candidates : voices)
+    .map((voice) => ({ voice, score: englishSpeechVoiceScore(voice, lang) }))
+    .filter((item) => Number.isFinite(item.score))
+    .sort((a, b) => a.score - b.score);
+
+  return sorted[0]?.voice || null;
+}
+
+function warmSpeechVoices() {
+  if (!("speechSynthesis" in window)) {
+    return;
+  }
+
+  window.speechSynthesis.getVoices();
+  window.speechSynthesis.onvoiceschanged = () => {
+    window.speechSynthesis.getVoices();
+  };
+}
+
 function speak(text = state.lastPhrase) {
   const speechText = localizeRuntimeText(text);
   if (!("speechSynthesis" in window) || !speechText || speechText === t("waitingInput")) {
@@ -2589,9 +2717,16 @@ function speak(text = state.lastPhrase) {
   }
 
   cancelSpeech();
+  const speechLang = t("speechLang");
   const utterance = new SpeechSynthesisUtterance(speechText);
-  utterance.lang = t("speechLang");
-  utterance.rate = 0.9;
+  utterance.lang = speechLang;
+  if (currentLanguage === "en") {
+    const voice = preferredEnglishSpeechVoice(speechLang);
+    if (voice) {
+      utterance.voice = voice;
+    }
+  }
+  utterance.rate = currentLanguage === "en" ? 0.86 : 0.9;
   utterance.pitch = 1;
   utterance.volume = 1;
   const recordId = state.recording.pendingRecordId;
@@ -3451,6 +3586,7 @@ function resolvePendingConfirmation(code) {
   if (code === "..") {
     clearPendingConfirmation();
     announce(pending.confirmedText, `${pending.label}已确认`, { shouldSpeak: true });
+    rememberConsumedBlinkCode(code, "pending_confirmation_confirmed");
     return true;
   }
 
@@ -3519,6 +3655,10 @@ function decodeBlinkCode() {
   }
 
   if (recordGuidedTestCode(code, { actionStartedAt, actionEndedAt, decodedAt })) {
+    return;
+  }
+
+  if (shouldSuppressRecentlyConsumedBlinkCode(code, decodedAt)) {
     return;
   }
 
@@ -5202,6 +5342,7 @@ navigator.mediaDevices?.addEventListener?.("devicechange", () => {
 
 window.addEventListener("resize", resizeCanvas);
 
+warmSpeechVoices();
 loadSavedInputChannelConfig();
 applyLanguage();
 
