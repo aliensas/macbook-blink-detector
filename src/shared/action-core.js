@@ -29,25 +29,12 @@ export const DEFAULT_ACTION_CONFIG = [
     flash: true,
   },
   {
-    id: "blink_double_long_rest",
-    gestureId: "blink_double_long",
-    label: "长闭眼2次",
-    displayText: "我想休息",
-    speechText: "我想休息",
-    instruction: "长闭眼一次约 1 秒；有效范围 0.7-2.8 秒，必须睁开。6 秒内做两次。",
-    category: "control",
-    input: "blink",
-    enabled: true,
-    requiresConfirmation: false,
-    locked: false,
-  },
-  {
     id: "blink_short_long_scratch",
     gestureId: "blink_short_long",
     label: "短眨+长闭眼",
     displayText: "我想挠痒痒",
     speechText: "我想挠痒痒",
-    instruction: "先短眨并睁开；2.5 秒内开始长闭眼约 1 秒，触发后进入挠痒痒二级选择。",
+    instruction: "先短眨并睁开；1.2 秒内开始长闭眼约 1 秒，触发后进入挠痒痒二级选择。",
     category: "care",
     input: "blink",
     enabled: true,
@@ -150,18 +137,11 @@ export const ACTION_LOCALIZATION = {
       instruction: "Blink three times in a row. Reopen the eyes clearly after each blink.",
       category: "emergency",
     },
-    blink_double_long_rest: {
-      label: "2 long eye closures",
-      displayText: "I want to rest.",
-      speechText: "I want to rest.",
-      instruction: "Close the eyes for about 1 second each time. Valid range is 0.7-2.8 seconds, then reopen. Do this twice within 6 seconds.",
-      category: "control",
-    },
     blink_short_long_scratch: {
       label: "Short blink + long closure",
       displayText: "I feel itchy.",
       speechText: "I feel itchy.",
-      instruction: "Short blink and reopen; within 2.5 seconds, start a long eye closure of about 1 second. Then choose the itchy area.",
+      instruction: "Short blink and reopen; within 1.2 seconds, start a long eye closure of about 1 second. Then choose the itchy area.",
       category: "care",
     },
     blink_long_short_position: {
@@ -212,7 +192,6 @@ export const ACTION_LOCALIZATION = {
 export const BLINK_CODE_GESTURE_IDS = {
   "..": "blink_double_short",
   "...": "blink_triple_short",
-  "--": "blink_double_long",
   ".-": "blink_short_long",
   "-.": "blink_long_short",
   "--.": "input_management",
@@ -238,7 +217,7 @@ export const SECONDARY_SELECTION_GROUP_DEFINITIONS = {
     label: "挠痒痒",
     title: "我想挠痒痒：请选择位置",
     promptSuffix: "请继续选择位置",
-    hint: "自动轮流高亮；两次短眨或轻抬眉后放松选择，长闭眼或摇头取消。",
+    hint: "自动轮流高亮；两次短眨或轻抬眉后放松选择，闭眼 3 秒以上或摇头退出。",
     options: [
       { id: "scratch_head", label: "头部", text: "请帮我挠头部" },
       { id: "scratch_face", label: "脸部/耳边", text: "请帮我挠脸部或耳边" },
@@ -254,7 +233,7 @@ export const SECONDARY_SELECTION_GROUP_DEFINITIONS = {
     label: "调整体位",
     title: "我想调整体位：请选择方式",
     promptSuffix: "请继续选择调整方式",
-    hint: "自动轮流高亮；两次短眨或轻抬眉后放松选择，长闭眼或摇头取消。",
+    hint: "自动轮流高亮；两次短眨或轻抬眉后放松选择，闭眼 3 秒以上或摇头退出。",
     options: [
       { id: "position_left", label: "向左侧翻身", text: "请帮我向左侧翻身" },
       { id: "position_right", label: "向右侧翻身", text: "请帮我向右侧翻身" },
@@ -268,7 +247,7 @@ export const SECONDARY_SELECTION_GROUP_DEFINITIONS = {
     id: "inputChannels",
     label: "输入管理",
     title: "输入管理：选择识别通道",
-    hint: "自动轮流高亮；两次短眨或抬眉选择，长闭眼退出。眨眼始终开启。",
+    hint: "自动轮流高亮；两次短眨或抬眉选择，闭眼 3 秒以上退出。眨眼始终开启。",
     options: [
       { id: "blink_only", type: "blinkOnly" },
       { id: "toggle_brow", type: "toggleInput", channel: "brow", label: "抬眉", onText: "抬眉识别已开启", offText: "抬眉识别已关闭" },
@@ -286,7 +265,7 @@ export const SECONDARY_SELECTION_LOCALIZATION = {
       label: "Scratch",
       title: "I feel itchy: choose the area",
       promptSuffix: "please choose the area",
-      hint: "The highlight moves automatically. Use two short blinks or a light eyebrow raise to select; long eye closure or head shake cancels.",
+      hint: "The highlight moves automatically. Use two short blinks or a light eyebrow raise to select; close eyes for 3 seconds or shake head to exit.",
       options: {
         scratch_head: { label: "Head", text: "Please scratch my head." },
         scratch_face: { label: "Face / ear", text: "Please scratch my face or near my ear." },
@@ -300,7 +279,7 @@ export const SECONDARY_SELECTION_LOCALIZATION = {
       label: "Position",
       title: "I want to adjust my position: choose the adjustment",
       promptSuffix: "please choose the adjustment",
-      hint: "The highlight moves automatically. Use two short blinks or a light eyebrow raise to select; long eye closure or head shake cancels.",
+      hint: "The highlight moves automatically. Use two short blinks or a light eyebrow raise to select; close eyes for 3 seconds or shake head to exit.",
       options: {
         position_left: { label: "Turn left", text: "Please help me turn to my left side." },
         position_right: { label: "Turn right", text: "Please help me turn to my right side." },
@@ -313,7 +292,7 @@ export const SECONDARY_SELECTION_LOCALIZATION = {
     inputChannels: {
       label: "Input management",
       title: "Input management: choose recognition channels",
-      hint: "The highlight moves automatically. Use two short blinks or eyebrow raise to select; long eye closure exits. Blink code is always on.",
+      hint: "The highlight moves automatically. Use two short blinks or eyebrow raise to select; close eyes for 3 seconds to exit. Blink code is always on.",
       options: {
         blink_only: { label: "Blink only" },
         toggle_brow: { label: "Eyebrow", onText: "Eyebrow raise detection enabled", offText: "Eyebrow raise detection disabled" },

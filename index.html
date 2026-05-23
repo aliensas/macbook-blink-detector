@@ -45,6 +45,17 @@
               <span>等待摄像头</span>
             </div>
           </div>
+          <div class="patient-secondary-bar" id="patientSecondaryBar" aria-label="患者二级选择" hidden>
+            <div class="patient-secondary-meta">
+              <span id="patientSecondaryTitle">二级选择</span>
+              <small id="patientSecondaryHint">两次短眨或抬眉选择，长闭眼 3 秒退出，8 秒安静</small>
+            </div>
+            <div class="patient-secondary-current-wrap">
+              <span id="patientSecondaryPrefix">当前选择</span>
+              <strong id="patientSecondaryCurrent">--</strong>
+            </div>
+            <div class="patient-secondary-options" id="patientSecondaryOptions"></div>
+          </div>
           <div class="camera-actions">
             <button class="primary-action" id="startButton" type="button" title="启动摄像头">
               <i data-lucide="play"></i>
@@ -81,7 +92,7 @@
             <div class="secondary-selection" id="secondarySelectionPanel" hidden>
               <div class="secondary-selection-header">
                 <span id="secondarySelectionTitle">二级选择</span>
-                <small id="secondarySelectionHint">两次短眨选择，长闭眼取消</small>
+                <small id="secondarySelectionHint">两次短眨选择，闭眼 3 秒退出</small>
               </div>
               <div class="secondary-selection-options" id="secondarySelectionOptions"></div>
               <div class="secondary-selection-actions">
@@ -271,7 +282,7 @@
                   <option value="-">单次长闭眼：单独不播报</option>
                   <option value="..">两次短眨：校准后请求帮助</option>
                   <option value="...">三次短眨：校准后紧急求助</option>
-                  <option value="--">两次长闭眼：校准后我想休息（6 秒内）</option>
+                  <option value="--">两次长闭眼：应忽略</option>
                   <option value=".-">短眨+长闭眼：校准后挠痒痒</option>
                   <option value="-.">长闭眼+短眨：校准后调整体位</option>
                   <option value="--.">长闭眼+长闭眼+短眨：校准后输入管理</option>
@@ -298,7 +309,7 @@
                     <option value="-">单次长闭眼</option>
                     <option value="..">两次短眨</option>
                     <option value="...">三次短眨</option>
-                    <option value="--">两次长闭眼（6 秒内）</option>
+                    <option value="--">两次长闭眼：应忽略</option>
                     <option value=".-">短眨+长闭眼</option>
                     <option value="-.">长闭眼+短眨</option>
                     <option value="BROW_RAISE">抬眉</option>
