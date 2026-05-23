@@ -2536,29 +2536,9 @@ function cancelSecondarySelection({ reason = "cancel", shouldSpeak = true, sourc
   return true;
 }
 
-function resolveSecondarySelectionBlinkCode(code) {
+function handleSecondarySelectionIgnoredBlinkCode(code) {
   if (!getActiveSecondarySelection()) {
     return false;
-  }
-
-  if (code === "..") {
-    if (isMenuActionCooldownActive()) {
-      clearSecondarySelectionLock({ resumeScan: true, render: true });
-      addLog("二级选择：菜单内冷却中，已忽略两次短眨选择");
-      finishPendingTestRecord({ note: "menu_action_cooldown_suppressed" });
-      return true;
-    }
-
-    if (!canTriggerCandidate("secondarySelect")) {
-      clearSecondarySelectionLock({ resumeScan: true, render: true });
-      blockCandidateForFaceQuality("secondarySelect", "二级选择");
-      return true;
-    }
-
-    if (selectSecondarySelection(undefined, currentLanguage === "en" ? "two short blinks" : "两次短眨")) {
-      rememberConsumedBlinkCode(code, "secondary_selection_select");
-    }
-    return true;
   }
 
   if (code === ".") {
@@ -2574,6 +2554,13 @@ function resolveSecondarySelectionBlinkCode(code) {
     setCommunicationMessage("单次长闭眼已忽略；两次短眨选择当前项，闭眼 3 秒退出。", "二级选择");
     addLog("二级选择：忽略单次长闭眼");
     finishPendingTestRecord({ note: "single_long_blink_ignored_in_secondary_selection" });
+    return true;
+  }
+
+  if (code === "..") {
+    clearSecondarySelectionLock({ resumeScan: true, render: true });
+    addLog("二级选择：两次短眨未被执行，已交由输入内核忽略");
+    finishPendingTestRecord({ note: "secondary_selection_code_ignored_by_input_machine" });
     return true;
   }
 
@@ -4290,7 +4277,7 @@ function handleAacBlinkMachineIgnoredCode(code, { emergencyOnly = false } = {}) 
     return true;
   }
 
-  if (getActiveSecondarySelection() && resolveSecondarySelectionBlinkCode(code)) {
+  if (getActiveSecondarySelection() && handleSecondarySelectionIgnoredBlinkCode(code)) {
     return true;
   }
 
