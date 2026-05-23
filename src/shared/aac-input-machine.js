@@ -144,6 +144,7 @@ export class AacInputMachine {
       ],
     };
     this.reset();
+    this.applyInitialState(options.initialState);
   }
 
   reset() {
@@ -195,6 +196,42 @@ export class AacInputMachine {
 
   setQualityState(qualityState) {
     this.qualityState = qualityState;
+  }
+
+  applyInitialState(initialState = {}) {
+    if (!initialState || typeof initialState !== "object") {
+      return;
+    }
+
+    if (Object.values(AAC_INPUT_MODES).includes(initialState.mode)) {
+      this.mode = initialState.mode;
+    }
+
+    if (initialState.menu) {
+      const groupId = initialState.menu.groupId || this.menu.groupId;
+      this.menu.groupId = groupId;
+      this.menu.index = this.clampMenuIndex(initialState.menu.index ?? this.menu.index);
+      this.menu.lockedIndex =
+        initialState.menu.lockedIndex === null || initialState.menu.lockedIndex === undefined
+          ? null
+          : this.clampMenuIndex(initialState.menu.lockedIndex);
+    }
+
+    if (initialState.confirmation) {
+      this.confirmation = { id: initialState.confirmation.id || "confirmation" };
+    }
+
+    if (Number.isFinite(initialState.cooldownUntil)) {
+      this.cooldownUntil = initialState.cooldownUntil;
+    }
+
+    if (Number.isFinite(initialState.recoveryCooldownUntil)) {
+      this.recoveryCooldownUntil = initialState.recoveryCooldownUntil;
+    }
+
+    if (Number.isFinite(initialState.menuActionCooldownUntil)) {
+      this.menuActionCooldownUntil = initialState.menuActionCooldownUntil;
+    }
   }
 
   setInputChannel(channel, enabled) {
@@ -659,7 +696,7 @@ export class AacInputMachine {
 
   selectInputManagementOption(itemId, index, commands, source) {
     if (itemId === "exit") {
-      this.exitToWaiting(commands, "input_management_exit");
+      this.exitToWaiting(commands, "input_management_exit", { groupId: this.menu.groupId, index, itemId, source });
       return;
     }
 
@@ -667,7 +704,9 @@ export class AacInputMachine {
       Object.keys(this.inputChannels).forEach((channel) => {
         this.setInputChannel(channel, false);
       });
-      commands.push(command(AAC_COMMANDS.TOGGLE_INPUT_CHANNEL, { itemId, channel: "blink", enabled: true, source }));
+      commands.push(
+        command(AAC_COMMANDS.TOGGLE_INPUT_CHANNEL, { itemId, channel: "blink", enabled: true, index, source }),
+      );
     } else if (itemId.startsWith("toggle_")) {
       const channel = itemId.slice("toggle_".length);
       if (Object.prototype.hasOwnProperty.call(this.inputChannels, channel)) {
@@ -677,6 +716,7 @@ export class AacInputMachine {
             itemId,
             channel,
             enabled: this.inputChannels[channel],
+            index,
             source,
           }),
         );
@@ -935,14 +975,14 @@ export class AacInputMachine {
     commands.push(command(AAC_COMMANDS.EXIT_QUIET, { mode: this.mode }));
   }
 
-  exitToWaiting(commands, reason) {
+  exitToWaiting(commands, reason, payload = {}) {
     this.clearTransientSequences();
     this.clearMenu();
     this.confirmation = null;
     this.mode = AAC_INPUT_MODES.WAITING;
     this.cooldownUntil = 0;
     this.recoveryCooldownUntil = 0;
-    commands.push(command(AAC_COMMANDS.EXIT_TO_WAITING, { reason }));
+    commands.push(command(AAC_COMMANDS.EXIT_TO_WAITING, { reason, ...payload }));
     return commands;
   }
 

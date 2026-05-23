@@ -35,6 +35,13 @@ import {
 import { createFaceQualityTracker } from "./shared/face-quality.js";
 import { createFaceRoiPreviewTracker } from "./shared/face-roi-preview.js";
 import {
+  AAC_COMMANDS,
+  AAC_INPUT_EVENTS,
+  AAC_INPUT_MODES,
+  AAC_QUALITY_STATES,
+  createAacInputMachine,
+} from "./shared/aac-input-machine.js";
+import {
   BROW_HEAD_MOTION_GUARD,
   FACE_SCALE_STABILITY,
   GESTURE_DETECTOR_PARAMS,
@@ -4165,6 +4172,220 @@ function resolvePendingConfirmation(code) {
   return true;
 }
 
+function aacBlinkDecodeMenuOptions() {
+  return Object.fromEntries(
+    Object.entries(SECONDARY_SELECTION_GROUPS).map(([groupId, group]) => [
+      groupId,
+      group.options.map((option) => option.id),
+    ]),
+  );
+}
+
+function aacBlinkDecodeMode(now, emergencyOnly) {
+  const activeSecondary = getActiveSecondarySelection(now);
+  if (activeSecondary?.groupId === "inputChannels") {
+    return AAC_INPUT_MODES.INPUT_MANAGEMENT;
+  }
+  if (activeSecondary) {
+    return AAC_INPUT_MODES.SECONDARY_MENU;
+  }
+  if (getActiveConfirmation(now)) {
+    return AAC_INPUT_MODES.CONFIRM_WINDOW;
+  }
+  if (emergencyOnly) {
+    return AAC_INPUT_MODES.COOLDOWN;
+  }
+  return AAC_INPUT_MODES.WAITING;
+}
+
+function createAacBlinkDecodeMachine({ decodedAt, emergencyOnly }) {
+  const mode = aacBlinkDecodeMode(decodedAt, emergencyOnly);
+  const activeSecondary = getActiveSecondarySelection(decodedAt);
+  const activeConfirmation = getActiveConfirmation(decodedAt);
+  const initialState = { mode };
+
+  if (activeSecondary) {
+    initialState.menu = {
+      groupId: activeSecondary.groupId,
+      index: state.secondarySelection.index,
+      lockedIndex: state.secondarySelection.lockedIndex,
+    };
+  }
+
+  if (activeConfirmation) {
+    initialState.confirmation = {
+      id: activeConfirmation.label || "confirmation",
+    };
+  }
+
+  if (emergencyOnly) {
+    initialState.cooldownUntil = decodedAt + 1;
+    initialState.menuActionCooldownUntil = decodedAt + 1;
+  }
+
+  return createAacInputMachine({
+    nowMs: decodedAt,
+    qualityState: AAC_QUALITY_STATES.GOOD,
+    inputChannels: {
+      brow: browToggle.checked,
+      mouth: mouthToggle.checked,
+      smile: smileToggle.checked,
+      head: headShakeToggle.checked,
+    },
+    menuOptions: aacBlinkDecodeMenuOptions(),
+    initialState,
+  });
+}
+
+function replayBlinkCodeThroughAacMachine(code, { decodedAt, emergencyOnly }) {
+  const machine = createAacBlinkDecodeMachine({ decodedAt, emergencyOnly });
+  const commands = [];
+  let eventAt = decodedAt;
+
+  code.split("").forEach((symbol) => {
+    commands.push(
+      ...machine.send(
+        {
+          type: symbol === "." ? AAC_INPUT_EVENTS.SHORT_BLINK : AAC_INPUT_EVENTS.LONG_BLINK,
+        },
+        eventAt,
+      ),
+    );
+    eventAt += symbol === "." ? 150 : 900;
+  });
+
+  commands.push(...machine.advance(2500));
+  return commands;
+}
+
+function executeBlinkGestureFromMachine(gestureId, code, { emergencyOnly = false } = {}) {
+  if (gestureId === BLINK_CODE_GESTURE_IDS[EMERGENCY_BLINK_CODE]) {
+    executeBlinkEmergencyCode({ note: emergencyOnly ? "cooldown_emergency_bypass" : "input_machine_emergency" });
+    return true;
+  }
+
+  const action = getActionConfigByGestureId(gestureId);
+  if (!action) {
+    addLog(`短码 ${displayBlinkCode(code)} 已识别，但没有启用对应语义`);
+    finishPendingTestRecord({ note: "action_config_missing" });
+    return true;
+  }
+
+  if (!canUseActionMapping()) {
+    setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成并确认引导校准后才播报短语。`, "未确认");
+    addLog(`短码 ${displayBlinkCode(code)} 已识别，因引导校准未确认而未播报`);
+    finishPendingTestRecord({ note: "calibration_not_confirmed" });
+    return true;
+  }
+
+  executeConfiguredAction(action, action.label || `短码 ${displayBlinkCode(code)}`);
+  return true;
+}
+
+function handleAacBlinkMachineIgnoredCode(code, { emergencyOnly = false } = {}) {
+  if (emergencyOnly && code !== EMERGENCY_BLINK_CODE) {
+    addLog(`当前仅监听紧急短码，${displayBlinkCode(code)} 已静默忽略`);
+    clearSecondarySelectionLock({ resumeScan: true, render: true });
+    finishPendingTestRecord({ note: "emergency_only_buffer_ignored" });
+    return true;
+  }
+
+  if (getActiveSecondarySelection() && resolveSecondarySelectionBlinkCode(code)) {
+    return true;
+  }
+
+  if (getActiveConfirmation() && resolvePendingConfirmation(code)) {
+    return true;
+  }
+
+  if (code === ".") {
+    addLog("忽略单次短眨");
+    finishPendingTestRecord({ note: "single_short_blink_ignored" });
+    return true;
+  }
+
+  if (code === "-") {
+    addLog("忽略单次长闭眼");
+    finishPendingTestRecord({ note: "single_long_blink_ignored" });
+    return true;
+  }
+
+  if (code === "--") {
+    addLog("忽略两次长闭眼；该短码当前无默认动作");
+    finishPendingTestRecord({ note: "double_long_blink_ignored" });
+    return true;
+  }
+
+  addLog(`未识别短码 ${code}，已静默忽略`);
+  finishPendingTestRecord({ note: "unrecognized_code" });
+  return true;
+}
+
+function applyAacBlinkMachineCommand(command, code, context) {
+  switch (command.type) {
+    case AAC_COMMANDS.ACTION:
+      return executeBlinkGestureFromMachine(command.gestureId, code, context);
+    case AAC_COMMANDS.ENTER_SECONDARY_MENU: {
+      const group = SECONDARY_SELECTION_GROUPS[command.groupId];
+      const action = group ? getActionConfigByGestureId(group.triggerGestureId) : null;
+      return executeBlinkGestureFromMachine(action?.gestureId, code, context);
+    }
+    case AAC_COMMANDS.ENTER_INPUT_MANAGEMENT:
+      return openInputManagementFromBlinkCode({ note: "input_machine_input_management" });
+    case AAC_COMMANDS.SELECT_MENU_ITEM:
+      if (selectSecondarySelection(command.index, currentLanguage === "en" ? "two short blinks" : "两次短眨")) {
+        rememberConsumedBlinkCode(code, "secondary_selection_select");
+      }
+      return true;
+    case AAC_COMMANDS.TOGGLE_INPUT_CHANNEL:
+      if (selectSecondarySelection(command.index, currentLanguage === "en" ? "two short blinks" : "两次短眨")) {
+        rememberConsumedBlinkCode(code, "input_management_select");
+      }
+      return true;
+    case AAC_COMMANDS.EXIT_TO_WAITING:
+      if (command.groupId === "inputChannels") {
+        if (selectSecondarySelection(command.index, currentLanguage === "en" ? "two short blinks" : "两次短眨")) {
+          rememberConsumedBlinkCode(code, "input_management_exit");
+        }
+        return true;
+      }
+      return false;
+    case AAC_COMMANDS.CONFIRM:
+      return resolvePendingConfirmation("..");
+    case AAC_COMMANDS.BLOCKED:
+      blockCandidateForFaceQuality(command.candidate || "ordinaryBlinkCode", "短码");
+      return true;
+    default:
+      return false;
+  }
+}
+
+function resolveBlinkCodeWithAacInputMachine(code, context) {
+  const commands = replayBlinkCodeThroughAacMachine(code, context);
+  let ignored = false;
+
+  for (const command of commands) {
+    if (command.type === AAC_COMMANDS.LOCK_MENU_ITEM || command.type === AAC_COMMANDS.MODE_CHANGED) {
+      continue;
+    }
+
+    if (command.type === AAC_COMMANDS.IGNORED) {
+      ignored = true;
+      continue;
+    }
+
+    if (applyAacBlinkMachineCommand(command, code, context)) {
+      return true;
+    }
+  }
+
+  if (ignored || commands.length === 0) {
+    return handleAacBlinkMachineIgnoredCode(code, context);
+  }
+
+  return false;
+}
+
 function decodeBlinkCode() {
   if (state.blinkClosedAt !== null || state.blinkWasClosed) {
     window.clearTimeout(state.blinkDecodeTimer);
@@ -4212,69 +4433,15 @@ function decodeBlinkCode() {
     return;
   }
 
-  if (emergencyOnly && code !== EMERGENCY_BLINK_CODE) {
-    addLog(`当前仅监听紧急短码，${displayBlinkCode(code)} 已静默忽略`);
-    clearSecondarySelectionLock({ resumeScan: true, render: true });
-    finishPendingTestRecord({ note: "emergency_only_buffer_ignored" });
-    return;
-  }
-
   if (shouldSuppressRecentlyConsumedBlinkCode(code, decodedAt)) {
     return;
   }
 
-  if (code === EMERGENCY_BLINK_CODE) {
-    executeBlinkEmergencyCode({ note: emergencyOnly ? "cooldown_emergency_bypass" : "normal_emergency" });
+  if (resolveBlinkCodeWithAacInputMachine(code, { decodedAt, emergencyOnly })) {
     return;
   }
 
-  if (resolveSecondarySelectionBlinkCode(code)) {
-    return;
-  }
-
-  if (resolvePendingConfirmation(code)) {
-    return;
-  }
-
-  if (code === ".") {
-    addLog("忽略单次短眨");
-    finishPendingTestRecord({ note: "single_short_blink_ignored" });
-    return;
-  }
-
-  if (code === "-") {
-    addLog("忽略单次长闭眼");
-    finishPendingTestRecord({ note: "single_long_blink_ignored" });
-    return;
-  }
-
-  if (code === "--") {
-    addLog("忽略两次长闭眼；该短码当前无默认动作");
-    finishPendingTestRecord({ note: "double_long_blink_ignored" });
-    return;
-  }
-
-  const gestureId = BLINK_CODE_GESTURE_IDS[code];
-  if (gestureId === "input_management") {
-    openInputManagementFromBlinkCode();
-    return;
-  }
-
-  const action = getActionConfigByGestureId(gestureId);
-  if (action) {
-    if (!canUseActionMapping()) {
-      setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成并确认引导校准后才播报短语。`, "未确认");
-      addLog(`短码 ${displayBlinkCode(code)} 已识别，因引导校准未确认而未播报`);
-      finishPendingTestRecord({ note: "calibration_not_confirmed" });
-      return;
-    }
-
-    executeConfiguredAction(action, action.label || `短码 ${displayBlinkCode(code)}`);
-    return;
-  }
-
-  addLog(`未识别短码 ${code}，已静默忽略`);
-  finishPendingTestRecord({ note: "unrecognized_code" });
+  handleAacBlinkMachineIgnoredCode(code, { emergencyOnly });
 }
 
 function enqueueBlinkSymbol(symbol, meta = {}) {

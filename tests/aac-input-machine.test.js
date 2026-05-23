@@ -152,6 +152,29 @@ test("menu index is clamped before selection", () => {
   );
 });
 
+test("initial state can hydrate a locked menu context for app adapters", () => {
+  const machine = createMachine({
+    initialState: {
+      mode: AAC_INPUT_MODES.SECONDARY_MENU,
+      menu: {
+        groupId: "scratch",
+        index: 1,
+        lockedIndex: 0,
+      },
+    },
+  });
+
+  const commands = run(machine, [S, 150, S, 1300]);
+
+  assert.ok(
+    hasCommand(
+      commands,
+      AAC_COMMANDS.SELECT_MENU_ITEM,
+      (item) => item.groupId === "scratch" && item.index === 0 && item.itemId === "scratch_head",
+    ),
+  );
+});
+
 test("secondary menu preserves SOS by waiting after the second short blink", () => {
   const machine = createMachine();
   run(machine, [S, 150, L, 400]);
