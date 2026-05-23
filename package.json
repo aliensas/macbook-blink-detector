@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "dev:ios": "node scripts/start-ios-dev.mjs",
+    "test:logic": "node --test tests/*.test.js",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "desktop": "npm run build && electron .",
