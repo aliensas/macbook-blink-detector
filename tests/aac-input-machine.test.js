@@ -127,6 +127,13 @@ test("secondary menu selection locks the item highlighted on the second short bl
   assert.ok(
     hasCommand(
       commands,
+      AAC_COMMANDS.LOCK_MENU_ITEM,
+      (item) => item.groupId === "scratch" && item.index === 1 && item.itemId === "scratch_face",
+    ),
+  );
+  assert.ok(
+    hasCommand(
+      commands,
       AAC_COMMANDS.SELECT_MENU_ITEM,
       (item) => item.groupId === "scratch" && item.index === 1 && item.itemId === "scratch_face",
     ),
@@ -261,6 +268,31 @@ test("long-close exit returns modal states to waiting", () => {
 
   assert.ok(hasCommand(commands, AAC_COMMANDS.EXIT_TO_WAITING, (item) => item.reason === "long_close_exit"));
   assert.equal(machine.snapshot().mode, AAC_INPUT_MODES.WAITING);
+});
+
+test("long-close exit in waiting only clears pending input", () => {
+  const machine = createMachine();
+  run(machine, [S]);
+
+  const commands = machine.send({ type: AAC_INPUT_EVENTS.LONG_CLOSE_EXIT });
+
+  assert.ok(hasCommand(commands, AAC_COMMANDS.EXIT_TO_WAITING, (item) => item.reason === "long_close_exit"));
+  assert.equal(machine.snapshot().mode, AAC_INPUT_MODES.WAITING);
+  assert.deepEqual(machine.snapshot().blinkBuffer, []);
+  assert.deepEqual(actionIds(commands), []);
+});
+
+test("long-close quiet clears confirmation without also confirming or cancelling", () => {
+  const machine = createMachine();
+  machine.send({ type: AAC_INPUT_EVENTS.START_CONFIRMATION, id: "mouth_care" });
+
+  const commands = machine.send({ type: AAC_INPUT_EVENTS.LONG_CLOSE_QUIET });
+
+  assert.ok(hasCommand(commands, AAC_COMMANDS.ENTER_QUIET));
+  assert.ok(!hasCommand(commands, AAC_COMMANDS.CONFIRM));
+  assert.ok(!hasCommand(commands, AAC_COMMANDS.CANCEL));
+  assert.equal(machine.snapshot().mode, AAC_INPUT_MODES.QUIET);
+  assert.equal(machine.snapshot().confirmation, null);
 });
 
 test("long-close quiet enters quiet mode and four short blinks recover with recovery cooldown", () => {

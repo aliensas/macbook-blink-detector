@@ -10,7 +10,7 @@
 - 二级菜单 / 输入管理中的 `..` 选择已由新内核决定；旧 `resolveSecondarySelectionBlinkCode` 已删除，剩余的是单次短眨/长闭眼的忽略提示适配器。
 - 确认窗口中的 `..` 确认已由新内核决定；旧 `resolvePendingConfirmation` 已删除，剩余的是确认执行函数和忽略提示适配器。
 - `src/main.js` 的短码等待窗口、最长组合时长、冷却时长已改为读取 `DEFAULT_AAC_TIMING`，避免主页面和输入内核维护两份不同参数。
-- 二级菜单 / 输入管理中，单次短眨不再锁定菜单；第二次短眨才锁定当时高亮项，并继续等待第三次短眨以保留 SOS。
+- 二级菜单 / 输入管理中，单次短眨不再锁定菜单；第二次短眨由输入内核发出 `LOCK_MENU_ITEM`，主页面只把命令映射为现有 UI 锁定状态，并继续等待第三次短眨以保留 SOS。
 - 摄像头启动、EAR 眨眼识别、TTS、ROI 预览、抬眉/张嘴/微笑/摇头检测器尚未迁移。
 
 ## 已被新内核接管的规则
@@ -72,9 +72,9 @@
 
 3. `lockSecondarySelectionForBlink`
    - 旧职责：第一次短眨锁定菜单项。
-   - 当前职责：第二次短眨时锁定当时高亮项，等待第三次短眨窗口结束后再选择；单次短眨不锁定。
-   - 保留条件：当前 UI 仍依赖旧锁定状态显示。
-   - 删除时机：菜单锁定状态由新内核命令统一驱动后。
+   - 当前状态：函数已改为 `applySecondarySelectionLockCommand`，只负责把新内核 `LOCK_MENU_ITEM` 命令映射到现有 UI 锁定状态。
+   - 保留条件：当前 UI 仍依赖本地锁定状态显示和暂停轮询。
+   - 删除时机：菜单 UI 状态完全由输入内核快照驱动后。
 
 4. `shouldSuppressRecentlyConsumedBlinkCode` / `rememberConsumedBlinkCode`
    - 旧职责：防止已被菜单消费的短码重复触发。

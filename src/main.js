@@ -2294,13 +2294,15 @@ function secondarySelectionCurrentIndex() {
   return state.secondarySelection.lockedIndex ?? state.secondarySelection.index;
 }
 
-function lockSecondarySelectionForBlink(now = performance.now()) {
+function applySecondarySelectionLockCommand(command, now = performance.now()) {
   const group = getActiveSecondarySelection(now);
   if (!group || state.secondarySelection.lockedIndex !== null) {
     return false;
   }
 
-  state.secondarySelection.lockedIndex = state.secondarySelection.index;
+  const requestedIndex = Number.isFinite(Number(command?.index)) ? Math.trunc(Number(command.index)) : state.secondarySelection.index;
+  const index = Math.min(Math.max(0, requestedIndex), Math.max(group.options.length - 1, 0));
+  state.secondarySelection.lockedIndex = index;
   state.secondarySelection.lockStartedAt = now;
   clearSecondarySelectionTimer();
   window.clearTimeout(state.secondarySelection.lockTimer);
@@ -4256,6 +4258,28 @@ function replayBlinkCodeThroughAacMachine(code, { decodedAt, emergencyOnly }) {
   return commands;
 }
 
+function applyImmediateAacBlinkBufferCommands({ now = performance.now(), emergencyOnly = false } = {}) {
+  const code = state.blinkCodeBuffer.join("");
+  if (code !== ".." || emergencyOnly || !getActiveSecondarySelection(now)) {
+    return false;
+  }
+
+  const machine = createAacBlinkDecodeMachine({ decodedAt: now, emergencyOnly: false });
+  const commands = [];
+  code.split("").forEach((symbol) => {
+    commands.push(...machine.send({ type: symbol === "." ? AAC_INPUT_EVENTS.SHORT_BLINK : AAC_INPUT_EVENTS.LONG_BLINK }, now));
+  });
+
+  let handled = false;
+  commands.forEach((command) => {
+    if (command.type === AAC_COMMANDS.LOCK_MENU_ITEM) {
+      handled = applySecondarySelectionLockCommand(command, now) || handled;
+    }
+  });
+
+  return handled;
+}
+
 function executeBlinkGestureFromMachine(gestureId, code, { emergencyOnly = false } = {}) {
   if (gestureId === BLINK_CODE_GESTURE_IDS[EMERGENCY_BLINK_CODE]) {
     executeBlinkEmergencyCode({ note: emergencyOnly ? "cooldown_emergency_bypass" : "input_machine_emergency" });
@@ -4479,9 +4503,7 @@ function enqueueBlinkSymbol(symbol, meta = {}) {
     state.blinkCodeDurations.push(meta.durationMs);
   }
   state.blinkCodeBuffer.push(symbol);
-  if (state.blinkCodeBuffer.join("") === ".." && !emergencyOnlyBuffer) {
-    lockSecondarySelectionForBlink(now);
-  }
+  applyImmediateAacBlinkBufferCommands({ now, emergencyOnly: emergencyOnlyBuffer });
   if (state.blinkCodeBuffer.length > 3) {
     state.blinkCodeOverflow = true;
   }
