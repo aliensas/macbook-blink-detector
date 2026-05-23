@@ -133,6 +133,18 @@
             </div>
           </div>
 
+          <div class="face-quality-panel" id="faceQualityPanel" data-level="missing">
+            <div class="signal-header">
+              <span id="faceQualityTitle">人脸质量</span>
+              <span id="faceQualityLabel">未见人脸</span>
+            </div>
+            <div class="signal-track">
+              <div class="signal-fill" id="faceQualityBar"></div>
+            </div>
+            <small id="faceQualityReason">请让患者面部进入画面</small>
+            <label class="face-quality-gate"><input id="faceQualityGateToggle" type="checkbox" checked />质量不足时暂停非紧急触发</label>
+          </div>
+
           <div class="control-group">
             <label for="cameraSelect">摄像头</label>
             <select id="cameraSelect"></select>
@@ -159,7 +171,15 @@
               <input id="overlayToggle" type="checkbox" checked />
               <span></span>
             </label>
-            <span>面部描边</span>
+            <span id="overlayToggleText">面部描边</span>
+          </div>
+
+          <div class="switch-row">
+            <label class="switch">
+              <input id="roiPreviewToggle" type="checkbox" checked />
+              <span></span>
+            </label>
+            <span id="roiPreviewToggleText">人脸近景框</span>
           </div>
 
           <div class="gesture-panel" aria-label="动作信号">

@@ -866,6 +866,60 @@ input[type="range"] {
   padding-top: 14px;
 }
 
+.face-quality-panel {
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.face-quality-panel .signal-header span:last-child {
+  justify-self: end;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.face-quality-panel .signal-fill {
+  background: linear-gradient(90deg, var(--red) 0%, var(--yellow) 45%, var(--green) 100%);
+}
+
+.face-quality-panel[data-level="good"] .signal-fill {
+  background: linear-gradient(90deg, var(--green) 0%, var(--accent) 100%);
+}
+
+.face-quality-panel[data-level="usable"] .signal-fill {
+  background: linear-gradient(90deg, var(--yellow) 0%, var(--accent) 100%);
+}
+
+.face-quality-panel[data-level="poor"] .signal-fill,
+.face-quality-panel[data-level="missing"] .signal-fill {
+  background: linear-gradient(90deg, var(--red) 0%, var(--yellow) 100%);
+}
+
+#faceQualityReason {
+  min-height: 18px;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.face-quality-gate {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.face-quality-gate input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
 .signal-track {
   height: 12px;
   overflow: hidden;
@@ -1914,6 +1968,7 @@ input[type="range"] {
   }
 
   .signal-panel,
+  .face-quality-panel,
   .gesture-panel {
     gap: 8px;
     padding-top: 10px;
@@ -2153,6 +2208,7 @@ input[type="range"] {
   }
 
   .signal-panel,
+  .face-quality-panel,
   .gesture-panel {
     gap: 8px;
     padding-top: 10px;

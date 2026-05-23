@@ -32,6 +32,8 @@ import {
   normalizeLanguage,
   setActionText,
 } from "./shared/action-core.js";
+import { createFaceQualityTracker } from "./shared/face-quality.js";
+import { createFaceRoiPreviewTracker } from "./shared/face-roi-preview.js";
 import "./styles.css";
 
 createIcons({
@@ -54,6 +56,7 @@ const thresholdValue = document.querySelector("#thresholdValue");
 const holdFramesRange = document.querySelector("#holdFramesRange");
 const holdFramesValue = document.querySelector("#holdFramesValue");
 const overlayToggle = document.querySelector("#overlayToggle");
+const roiPreviewToggle = document.querySelector("#roiPreviewToggle");
 const diagnosticPanel = document.querySelector("#diagnosticPanel");
 const diagnosticTitle = document.querySelector("#diagnosticTitle");
 const diagnosticMessage = document.querySelector("#diagnosticMessage");
@@ -64,6 +67,11 @@ const earValue = document.querySelector("#earValue");
 const fpsValue = document.querySelector("#fpsValue");
 const earBar = document.querySelector("#earBar");
 const confidenceLabel = document.querySelector("#confidenceLabel");
+const faceQualityPanel = document.querySelector("#faceQualityPanel");
+const faceQualityLabel = document.querySelector("#faceQualityLabel");
+const faceQualityReason = document.querySelector("#faceQualityReason");
+const faceQualityBar = document.querySelector("#faceQualityBar");
+const faceQualityGateToggle = document.querySelector("#faceQualityGateToggle");
 const eventLog = document.querySelector("#eventLog");
 const messageText = document.querySelector("#messageText");
 const codeBuffer = document.querySelector("#codeBuffer");
@@ -223,10 +231,15 @@ const UI_TEXT = {
     state: "状态",
     notDetected: "未检测",
     eyeOpenness: "眼睛开合",
+    faceQuality: "人脸质量",
+    faceQualityGate: "质量不足时暂停非紧急触发",
+    faceQualityInitial: "未见人脸",
+    faceQualityInitialReason: "请让患者面部进入画面",
     camera: "摄像头",
     blinkThreshold: "眨眼阈值",
     closedFrames: "闭眼帧数",
     faceOverlay: "面部描边",
+    roiPreview: "人脸近景框",
     optionalGestures: "可选动作",
     browMeter: "抬眉 是/确认",
     mouthMeter: "张嘴两次 吸痰",
@@ -336,10 +349,15 @@ const UI_TEXT = {
     state: "State",
     notDetected: "Not detected",
     eyeOpenness: "Eye openness",
+    faceQuality: "Face quality",
+    faceQualityGate: "Pause non-emergency triggers when quality is poor",
+    faceQualityInitial: "No face visible",
+    faceQualityInitialReason: "Place the patient’s face in view",
     camera: "Camera",
     blinkThreshold: "Blink threshold",
     closedFrames: "Closed frames",
     faceOverlay: "Face outline",
+    roiPreview: "Face ROI preview",
     optionalGestures: "Optional gestures",
     browMeter: "Eyebrow raise Yes/Confirm",
     mouthMeter: "Open mouth twice Suction",
@@ -466,10 +484,15 @@ const STATIC_TEXT_BINDINGS = [
   [".metric:nth-child(2) .metric-label", "state"],
   ["#blinkState", "notDetected"],
   [".signal-header span:first-child", "eyeOpenness"],
+  ["#faceQualityTitle", "faceQuality"],
+  ["#faceQualityLabel", "faceQualityInitial"],
+  ["#faceQualityReason", "faceQualityInitialReason"],
+  ['label:has(#faceQualityGateToggle)', "faceQualityGate", "labelWithInput"],
   ['label[for="cameraSelect"]', "camera"],
   ['label[for="thresholdRange"]', "blinkThreshold"],
   ['label[for="holdFramesRange"]', "closedFrames"],
-  [".switch-row > span", "faceOverlay"],
+  ["#overlayToggleText", "faceOverlay"],
+  ["#roiPreviewToggleText", "roiPreview"],
   [".gesture-header span:first-child", "optionalGestures"],
   [".gesture-row:nth-child(1) span", "browMeter"],
   [".gesture-row:nth-child(2) span", "mouthMeter"],
@@ -563,8 +586,29 @@ const RUNTIME_TEXT_EN = {
   "眨眼": "Blink",
   "睁眼": "Eyes open",
   "未见人脸": "No face visible",
+  "请让患者面部进入画面": "Place the patient’s face in view",
   "关键点不足": "Not enough landmarks",
   "画面稳定中": "Stabilizing view",
+  "人脸质量": "Face quality",
+  "人脸质量良好": "Face quality good",
+  "人脸偏小": "Face is too small",
+  "人脸略小": "Face is slightly small",
+  "人脸偏离中心": "Face is off center",
+  "人脸接近画面边缘": "Face is near the edge",
+  "人脸检测不稳定": "Face tracking is unstable",
+  "质量不足，已暂停触发": "Quality too low; trigger paused",
+  "人脸质量不足，请调整手机位置。": "Face quality is too low. Please adjust the phone position.",
+  "请将手机靠近患者，或使用 2x 镜头。": "Move the phone closer to the patient, or use the 2x lens.",
+  "请让患者面部靠近画面中心。": "Keep the patient’s face closer to the center.",
+  "请保留完整眉毛、嘴部和下巴，不要贴近边缘。": "Keep the eyebrows, mouth, and chin fully in view, away from the edge.",
+  "请固定手机或改善光线，等待画面稳定。": "Stabilize the phone or improve lighting, then wait for the view to settle.",
+  "人脸质量可用，但建议调整手机距离和角度。": "Face quality is usable, but phone distance and angle could be improved.",
+  "人脸质量良好，可以识别。": "Face quality is good. Recognition is available.",
+  "人脸质量门控已关闭": "Face quality gate is off",
+  "人脸质量门控已开启": "Face quality gate is on",
+  "ROI 预览": "ROI preview",
+  "人脸近景框已关闭": "Face ROI preview is off",
+  "人脸近景框已开启": "Face ROI preview is on",
   "点头中，抬眉暂停": "Nodding detected, eyebrow paused",
   "摇头中，微笑暂停": "Head motion detected, smile paused",
   "输入管理中忽略摇头": "Head shake ignored in input management",
@@ -706,6 +750,9 @@ function localizeRuntimeText(text) {
     .replace(/^检测到(.+)；完成并确认引导校准后才启用动作映射。$/, "$1 detected. Action mapping is enabled only after guided calibration is confirmed.")
     .replace(/^短码测试中，(.+)动作已记录但不执行。$/, "$1 recorded during blink-code testing but not executed.")
     .replace(/^(.+)：指令冷却中，已忽略重复触发$/, "$1: action cooldown active; repeated trigger ignored.")
+    .replace(/^(.+)：质量不足，已暂停触发$/, "$1: face quality too low; trigger paused.")
+    .replace(/^(.+)：质量不足，未进入动作组合$/, "$1: face quality too low; action sequence not started.")
+    .replace(/^(.+)：当前模式中因人脸质量不足已忽略$/, "$1 ignored in the current mode because face quality is too low.")
     .replace(/^(.+)超时，已取消$/, "$1 timed out and was canceled");
 }
 
@@ -868,6 +915,8 @@ const ACTION_COOLDOWN_MS = {
 
 const ACTION_CONFIG = createActionConfig(currentLanguage);
 const SECONDARY_SELECTION_GROUPS = createSecondarySelectionGroups(currentLanguage);
+const faceQualityTracker = createFaceQualityTracker();
+const faceRoiPreviewTracker = createFaceRoiPreviewTracker();
 
 function applySecondarySelectionLanguage() {
   applySecondarySelectionGroupLanguage(SECONDARY_SELECTION_GROUPS, currentLanguage);
@@ -1038,6 +1087,8 @@ const state = {
   fpsSamples: [],
   lastFps: null,
   lastSignals: null,
+  faceQuality: faceQualityTracker.reset(),
+  faceRoiPreview: faceRoiPreviewTracker.reset(),
   lastFrameAt: 0,
   cameraLabelsReady: false,
   pausedUntil: 0,
@@ -1159,6 +1210,18 @@ function snapshotSignals() {
     headYaw: Number.isFinite(signals.headYaw) ? Number(signals.headYaw.toFixed(4)) : null,
     headPitch: Number.isFinite(signals.headPitch) ? Number(signals.headPitch.toFixed(4)) : null,
     headPitchDelta: Number.isFinite(signals.headPitchDelta) ? Number(signals.headPitchDelta.toFixed(4)) : null,
+    faceQualityLevel: state.faceQuality?.level || null,
+    faceQualityReason: state.faceQuality?.reason || null,
+    faceQualityScore: Number.isFinite(state.faceQuality?.score) ? Number(state.faceQuality.score.toFixed(4)) : null,
+    faceHeightRatio: Number.isFinite(state.faceQuality?.metrics?.heightRatio)
+      ? Number(state.faceQuality.metrics.heightRatio.toFixed(4))
+      : null,
+    faceCenterOffset: Number.isFinite(state.faceQuality?.metrics?.centerOffset)
+      ? Number(state.faceQuality.metrics.centerOffset.toFixed(4))
+      : null,
+    faceJitter: Number.isFinite(state.faceQuality?.metrics?.jitter)
+      ? Number(state.faceQuality.metrics.jitter.toFixed(4))
+      : null,
     hasFace: Boolean(signals.hasFace),
   };
 }
@@ -1220,6 +1283,7 @@ function getRecordingEnvironment() {
     thresholds: {
       blinkEar: Number(thresholdRange.value),
       holdFrames: Number(holdFramesRange.value),
+      faceQualityGate: isFaceQualityGateEnabled(),
     },
   };
 }
@@ -1417,6 +1481,12 @@ function exportRecordingCsv() {
     "headYaw",
     "headPitch",
     "headPitchDelta",
+    "faceQualityLevel",
+    "faceQualityReason",
+    "faceQualityScore",
+    "faceHeightRatio",
+    "faceCenterOffset",
+    "faceJitter",
     "text",
     "note",
   ];
@@ -1466,7 +1536,82 @@ function resetLiveMetrics(status = "未检测") {
   confidenceLabel.textContent = "--";
   lastGesture.textContent = "--";
   earBar.style.width = "0%";
+  resetFaceQuality();
+  resetFaceRoiPreview();
   updateGestureMeters({ browUp: 0, mouthOpen: 0, smile: 0, headYaw: 0 });
+}
+
+function faceQualityCopy(quality = state.faceQuality) {
+  if (!quality) {
+    return {
+      label: "未见人脸",
+      reason: "请让患者面部进入画面",
+    };
+  }
+
+  if (quality.level === "good") {
+    return {
+      label: "人脸质量良好",
+      reason: "人脸质量良好，可以识别。",
+    };
+  }
+
+  const labelByReason = {
+    missing: "未见人脸",
+    tooSmall: "人脸偏小",
+    small: "人脸略小",
+    offCenter: "人脸偏离中心",
+    nearEdge: "人脸接近画面边缘",
+    unstable: "人脸检测不稳定",
+    slightlyUnstable: "人脸检测不稳定",
+  };
+
+  const reasonByReason = {
+    missing: "请让患者面部进入画面",
+    tooSmall: "请将手机靠近患者，或使用 2x 镜头。",
+    small: "人脸质量可用，但建议调整手机距离和角度。",
+    offCenter: "请让患者面部靠近画面中心。",
+    nearEdge: "请保留完整眉毛、嘴部和下巴，不要贴近边缘。",
+    unstable: "请固定手机或改善光线，等待画面稳定。",
+    slightlyUnstable: "请固定手机或改善光线，等待画面稳定。",
+  };
+
+  return {
+    label: labelByReason[quality.reason] || "人脸质量",
+    reason: reasonByReason[quality.reason] || "人脸质量可用，但建议调整手机距离和角度。",
+  };
+}
+
+function renderFaceQuality(quality = state.faceQuality) {
+  if (!faceQualityPanel || !faceQualityLabel || !faceQualityReason || !faceQualityBar) {
+    return;
+  }
+
+  const copy = faceQualityCopy(quality);
+  faceQualityPanel.dataset.level = quality?.level || "missing";
+  faceQualityLabel.textContent = localizeRuntimeText(copy.label);
+  faceQualityReason.textContent = localizeRuntimeText(copy.reason);
+  faceQualityBar.style.width = `${Math.round((quality?.score || 0) * 100)}%`;
+}
+
+function updateFaceQuality(landmarks) {
+  state.faceQuality = faceQualityTracker.update(landmarks);
+  renderFaceQuality();
+  return state.faceQuality;
+}
+
+function resetFaceQuality() {
+  state.faceQuality = faceQualityTracker.reset();
+  renderFaceQuality();
+}
+
+function updateFaceRoiPreview(landmarks) {
+  state.faceRoiPreview = faceRoiPreviewTracker.update(landmarks);
+  return state.faceRoiPreview;
+}
+
+function resetFaceRoiPreview() {
+  state.faceRoiPreview = faceRoiPreviewTracker.reset();
 }
 
 function resetSignalBaseline() {
@@ -2362,6 +2507,10 @@ function executeConfiguredAction(action, label = action?.label || "") {
     return true;
   }
 
+  if (shouldBlockActionForFaceQuality(action)) {
+    return blockActionForFaceQuality(label);
+  }
+
   const secondaryGroup = secondarySelectionGroupForAction(action);
   if (secondaryGroup) {
     const started = startSecondarySelection(secondaryGroup, action, label);
@@ -2607,6 +2756,65 @@ function isActionCooldownActive(now = performance.now()) {
 
 function startActionCooldown(ms = ACTION_COOLDOWN_MS.default) {
   state.actionCooldownUntil = Math.max(state.actionCooldownUntil, performance.now() + ms);
+}
+
+function isFaceQualityGateEnabled() {
+  return faceQualityGateToggle?.checked ?? true;
+}
+
+function shouldBlockActionForFaceQuality(action) {
+  if (!isFaceQualityGateEnabled() || action?.category === "emergency") {
+    return false;
+  }
+
+  return Boolean(state.faceQuality?.blocking);
+}
+
+function blockActionForFaceQuality(label = "动作") {
+  setCommunicationMessage("人脸质量不足，请调整手机位置。", "人脸质量");
+  addLog(`${label}：质量不足，已暂停触发`);
+  finishPendingTestRecord({
+    label,
+    text: "人脸质量不足，请调整手机位置。",
+    note: `face_quality_blocked:${state.faceQuality?.reason || "unknown"}`,
+  });
+  finishInputTurnAfterTerminalAction({ cooldownMs: ACTION_COOLDOWN_MS.terminal });
+  return true;
+}
+
+function suppressGestureEventForFaceQuality(event, label = "动作") {
+  if (!isFaceQualityGateEnabled() || !state.faceQuality?.blocking) {
+    return false;
+  }
+
+  const activeSecondary = Boolean(getActiveSecondarySelection());
+  const activeConfirmation = Boolean(state.pendingConfirmation);
+
+  if (event.name === "BROW_RAISE" && (activeSecondary || activeConfirmation)) {
+    lastGesture.textContent = localizeRuntimeText("质量不足，已暂停触发");
+    addLog(`${label}：当前模式中因人脸质量不足已忽略`);
+    finishPendingTestRecord({ note: `face_quality_blocked:${state.faceQuality.reason}` });
+    return true;
+  }
+
+  if (event.name === "HEAD_SHAKE" && (activeSecondary || activeConfirmation)) {
+    lastGesture.textContent = localizeRuntimeText("质量不足，已暂停触发");
+    addLog(`${label}：当前模式中因人脸质量不足已忽略`);
+    finishPendingTestRecord({ note: `face_quality_blocked:${state.faceQuality.reason}` });
+    return true;
+  }
+
+  if (event.name === "MOUTH_OPEN" || event.name === "SMILE") {
+    setCommunicationMessage("人脸质量不足，请调整手机位置。", "人脸质量");
+    addLog(`${label}：质量不足，未进入动作组合`);
+    finishPendingTestRecord({ note: `face_quality_blocked:${state.faceQuality.reason}` });
+    resetGestureSequences();
+    startActionCooldown(ACTION_COOLDOWN_MS.secondarySelection);
+    markInputWaiting({ preserveMessage: true });
+    return true;
+  }
+
+  return false;
 }
 
 function clearActionCooldown() {
@@ -4057,6 +4265,10 @@ function handleGestureEvent(event, label) {
     return;
   }
 
+  if (suppressGestureEventForFaceQuality(event, label)) {
+    return;
+  }
+
   if (event.name === "BROW_RAISE") {
     if (selectSecondarySelection(undefined, label)) {
       return;
@@ -4794,7 +5006,10 @@ function detectLoop() {
     try {
       const result = state.faceLandmarker.detectForVideo(video, performance.now());
       const landmarks = result.faceLandmarks?.[0];
+      const faceQuality = updateFaceQuality(landmarks);
+      updateFaceRoiPreview(landmarks);
       const signals = extractFaceSignals(result, landmarks);
+      signals.faceQuality = faceQuality;
       updateFps();
       drawOverlay(landmarks);
       processFaceSignals(signals, performance.now());
@@ -4950,6 +5165,17 @@ function processFaceSignals(signals, now) {
     return;
   }
 
+  if (isFaceQualityGateEnabled() && state.faceQuality?.blocking) {
+    lastGesture.textContent = localizeRuntimeText("质量不足，已暂停触发");
+    resetGestureSequences();
+    gestureDetectors.brow.reset();
+    gestureDetectors.secondaryBrow.reset();
+    gestureDetectors.mouth.reset();
+    gestureDetectors.smile.reset();
+    headShakeDetector.reset();
+    return;
+  }
+
   const mouthLooksActive = detectionSignals.mouthOpen >= MOUTH_SMILE_SUPPRESS_THRESHOLD;
   const smileLooksActive = smileToggle.checked && detectionSignals.smile >= SMILE_MOUTH_SUPPRESS_THRESHOLD;
   const headMotionSuppressesBrow = isHeadMotionSuppressingBrow(signals, detectionSignals, now);
@@ -5047,7 +5273,10 @@ function handleBlinkReleased(now, ear) {
 function drawOverlay(landmarks) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if (!landmarks || !overlayToggle.checked) {
+  const shouldDrawLandmarks = Boolean(landmarks && overlayToggle.checked);
+  const shouldDrawRoi = Boolean(roiPreviewToggle?.checked && state.faceRoiPreview?.visible);
+
+  if (!shouldDrawLandmarks && !shouldDrawRoi) {
     return;
   }
 
@@ -5091,24 +5320,57 @@ function drawOverlay(landmarks) {
     indices.forEach((index) => drawPoint(landmarks[index], color, pointRadius));
   };
 
-  drawPath({ indices: FACE_OVAL, color: "rgba(224, 242, 254, 0.9)", lineWidth: 2.5, pointRadius: 1.7, close: true });
-  drawPath({ indices: FACE_CENTER_LINE, color: "rgba(203, 213, 225, 0.68)", lineWidth: 1.6, pointRadius: 1.3, dash: [8, 8] });
-
-  drawPath({ indices: LEFT_BROW_UPPER, color: "#facc15", lineWidth: 3, pointRadius: 2.4 });
-  drawPath({ indices: LEFT_BROW_LOWER, color: "#fde047", lineWidth: 2.2, pointRadius: 2 });
-  drawPath({ indices: RIGHT_BROW_UPPER, color: "#facc15", lineWidth: 3, pointRadius: 2.4 });
-  drawPath({ indices: RIGHT_BROW_LOWER, color: "#fde047", lineWidth: 2.2, pointRadius: 2 });
-
-  drawPath({ indices: OUTER_LIP, color: "#fb7185", lineWidth: 3, pointRadius: 2.2, close: true });
-  drawPath({ indices: INNER_LIP, color: "#fda4af", lineWidth: 2.4, pointRadius: 1.8, close: true });
-
-  drawPath({ indices: LEFT_EYE, color: "#2dd4bf", lineWidth: 3, pointRadius: 3, close: true });
-  drawPath({ indices: RIGHT_EYE, color: "#38bdf8", lineWidth: 3, pointRadius: 3, close: true });
-  [...LEFT_IRIS, ...RIGHT_IRIS].forEach((index) => {
-    if (landmarks[index]) {
-      drawPoint(landmarks[index], "#f8fafc", 2);
+  const drawRoiPreview = (preview) => {
+    const roi = preview?.roi;
+    if (!roi) {
+      return;
     }
-  });
+
+    const x = roi.x * canvas.width;
+    const y = roi.y * canvas.height;
+    const width = roi.width * canvas.width;
+    const height = roi.height * canvas.height;
+    const color = preview.stable ? "rgba(167, 139, 250, 0.95)" : "rgba(251, 191, 36, 0.9)";
+    const fill = preview.stable ? "rgba(167, 139, 250, 0.08)" : "rgba(251, 191, 36, 0.08)";
+
+    ctx.save();
+    ctx.fillStyle = fill;
+    ctx.fillRect(x, y, width, height);
+    ctx.setLineDash([16, 10]);
+    ctx.lineWidth = Math.max(3, canvas.width * 0.0025);
+    ctx.strokeStyle = color;
+    ctx.strokeRect(x, y, width, height);
+    ctx.setLineDash([]);
+    ctx.font = `${Math.max(16, canvas.width * 0.014)}px system-ui, sans-serif`;
+    ctx.fillStyle = color;
+    ctx.fillText(localizeRuntimeText("ROI 预览"), x + 10, Math.max(22, y + 24));
+    ctx.restore();
+  };
+
+  if (shouldDrawLandmarks) {
+    drawPath({ indices: FACE_OVAL, color: "rgba(224, 242, 254, 0.9)", lineWidth: 2.5, pointRadius: 1.7, close: true });
+    drawPath({ indices: FACE_CENTER_LINE, color: "rgba(203, 213, 225, 0.68)", lineWidth: 1.6, pointRadius: 1.3, dash: [8, 8] });
+
+    drawPath({ indices: LEFT_BROW_UPPER, color: "#facc15", lineWidth: 3, pointRadius: 2.4 });
+    drawPath({ indices: LEFT_BROW_LOWER, color: "#fde047", lineWidth: 2.2, pointRadius: 2 });
+    drawPath({ indices: RIGHT_BROW_UPPER, color: "#facc15", lineWidth: 3, pointRadius: 2.4 });
+    drawPath({ indices: RIGHT_BROW_LOWER, color: "#fde047", lineWidth: 2.2, pointRadius: 2 });
+
+    drawPath({ indices: OUTER_LIP, color: "#fb7185", lineWidth: 3, pointRadius: 2.2, close: true });
+    drawPath({ indices: INNER_LIP, color: "#fda4af", lineWidth: 2.4, pointRadius: 1.8, close: true });
+
+    drawPath({ indices: LEFT_EYE, color: "#2dd4bf", lineWidth: 3, pointRadius: 3, close: true });
+    drawPath({ indices: RIGHT_EYE, color: "#38bdf8", lineWidth: 3, pointRadius: 3, close: true });
+    [...LEFT_IRIS, ...RIGHT_IRIS].forEach((index) => {
+      if (landmarks[index]) {
+        drawPoint(landmarks[index], "#f8fafc", 2);
+      }
+    });
+  }
+
+  if (shouldDrawRoi) {
+    drawRoiPreview(state.faceRoiPreview);
+  }
 }
 
 function resetCounters() {
@@ -5143,6 +5405,7 @@ function applyLanguage({ loadActionText = true } = {}) {
 
   renderActionSettings();
   updateActionGuide();
+  renderFaceQuality();
   updateRecordingUI();
   updateCalibrationUI();
   renderSecondarySelection();
@@ -5193,6 +5456,21 @@ resetButton.addEventListener("click", resetCounters);
 
 languageToggleButton?.addEventListener("click", () => {
   switchLanguage(currentLanguage === "zh" ? "en" : "zh");
+});
+
+faceQualityGateToggle?.addEventListener("change", () => {
+  const message = faceQualityGateToggle.checked ? "人脸质量门控已开启" : "人脸质量门控已关闭";
+  addLog(message);
+  if (!faceQualityGateToggle.checked) {
+    lastGesture.textContent = localizeRuntimeText(message);
+  }
+});
+
+roiPreviewToggle?.addEventListener("change", () => {
+  addLog(roiPreviewToggle.checked ? "人脸近景框已开启" : "人脸近景框已关闭");
+  if (!roiPreviewToggle.checked) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
 });
 
 repeatSpeechButton.addEventListener("click", () => {
