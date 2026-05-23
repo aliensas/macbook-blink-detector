@@ -34,6 +34,15 @@ import {
 } from "./shared/action-core.js";
 import { createFaceQualityTracker } from "./shared/face-quality.js";
 import { createFaceRoiPreviewTracker } from "./shared/face-roi-preview.js";
+import {
+  BROW_HEAD_MOTION_GUARD,
+  FACE_SCALE_STABILITY,
+  GESTURE_DETECTOR_PARAMS,
+  HEAD_SHAKE_PARAMS,
+  MOUTH_SEQUENCE_PARAMS,
+  SMILE_HEAD_MOTION_GUARD,
+  SMILE_SEQUENCE_PARAMS,
+} from "./shared/gesture-params.js";
 import "./styles.css";
 
 createIcons({
@@ -944,28 +953,14 @@ const OPTIONAL_INPUT_CHANNELS = {
   head: { toggle: headShakeToggle, ...OPTIONAL_INPUT_CHANNEL_DEFINITIONS.head },
 };
 const CONFIRMATION_TIMEOUT_MS = 10 * 1000;
-const MOUTH_DOUBLE_WINDOW_MS = 2200;
-const MOUTH_BROW_SUPPRESS_THRESHOLD = 0.045;
-const MOUTH_SMILE_SUPPRESS_THRESHOLD = 0.16;
-const SMILE_MOUTH_SUPPRESS_THRESHOLD = 0.14;
-const SMILE_DOUBLE_WINDOW_MS = 1400;
-const SMILE_DOUBLE_MIN_GAP_MS = 550;
-const SMILE_WIDTH_DELTA_SCALE = 0.055;
-const HEAD_SHAKE_YAW_THRESHOLD = 0.022;
-const SMILE_HEAD_MOTION_GUARD = {
-  settleMs: 500,
-};
-const BROW_HEAD_MOTION_GUARD = {
-  pitchDelta: 0.03,
-  pitchJump: 0.012,
-  centerJump: 0.015,
-  settleMs: 650,
-};
-const FACE_SCALE_STABILITY = {
-  relativeJump: 0.1,
-  absoluteJump: 0.02,
-  settleMs: 700,
-};
+const MOUTH_DOUBLE_WINDOW_MS = MOUTH_SEQUENCE_PARAMS.doubleWindowMs;
+const MOUTH_BROW_SUPPRESS_THRESHOLD = MOUTH_SEQUENCE_PARAMS.browSuppressThreshold;
+const MOUTH_SMILE_SUPPRESS_THRESHOLD = MOUTH_SEQUENCE_PARAMS.smileSuppressThreshold;
+const SMILE_MOUTH_SUPPRESS_THRESHOLD = SMILE_SEQUENCE_PARAMS.mouthSuppressThreshold;
+const SMILE_DOUBLE_WINDOW_MS = SMILE_SEQUENCE_PARAMS.doubleWindowMs;
+const SMILE_DOUBLE_MIN_GAP_MS = SMILE_SEQUENCE_PARAMS.doubleMinGapMs;
+const SMILE_WIDTH_DELTA_SCALE = SMILE_SEQUENCE_PARAMS.widthDeltaScale;
+const HEAD_SHAKE_YAW_THRESHOLD = HEAD_SHAKE_PARAMS.yawThreshold;
 const CALIBRATION_STORAGE_KEY = "alsFacialAac.defaultPatientCalibration.v1";
 const ACTION_TEXT_STORAGE_KEY = "alsFacialAac.actionText.v1";
 const INPUT_CHANNEL_STORAGE_KEY = "alsFacialAac.inputChannels.v1";
@@ -3060,7 +3055,8 @@ function markInputWaiting({ preserveMessage = true } = {}) {
     return;
   }
 
-  setCommunicationMessage("等待输入", "--");
+  setCommunicationMessage("等待输入", "等待输入");
+  updateCodeBuffer();
 }
 
 function finishInputTurnAfterTerminalAction({ cooldownMs = ACTION_COOLDOWN_MS.terminal, preserveMessage = true } = {}) {
@@ -3120,7 +3116,8 @@ function returnToWaitingInputFromLongClose({ duration, startedAt, endedAt }) {
   clearPendingConfirmation();
   clearSecondarySelection();
   resetGestureSequences();
-  setCommunicationMessage("等待输入", "已退出");
+  clearTransientCooldowns();
+  markInputWaiting({ preserveMessage: false });
   addLog(`长闭眼 ${Math.round(duration)}ms：已退出当前模式，返回待输入`);
   finishPendingTestRecord({ text: "等待输入", label: "已退出", note: "long_close_exit_to_waiting" });
   return true;
@@ -3147,16 +3144,6 @@ function enterQuietModeFromLongClose({ duration, startedAt, endedAt }) {
   setCommunicationMessage("系统安静中，连续短眨 4 次恢复文字和语音播报。", "系统安静模式");
   addLog(`长闭眼 ${Math.round(duration)}ms：进入系统安静模式，仅监听连续 4 次短眨恢复`);
   finishPendingTestRecord({ text: "系统安静中", label: "系统安静模式", note: "quiet_mode_started" });
-  return true;
-}
-
-function hasLongCloseExitContext() {
-  return Boolean(state.secondarySelection.active || state.pendingConfirmation);
-}
-
-function clearIdleLongClose({ duration }) {
-  clearBlinkCodeBuffer();
-  addLog(`长闭眼 ${Math.round(duration)}ms：等待输入状态下仅清空未完成短码`);
   return true;
 }
 
@@ -3218,11 +3205,7 @@ function handleLongCloseControl(duration, startedAt, endedAt) {
       blockCandidateForFaceQuality("longCloseExit", "长闭眼退出");
       return true;
     }
-    if (hasLongCloseExitContext()) {
-      return returnToWaitingInputFromLongClose({ duration, startedAt, endedAt });
-    }
-
-    return clearIdleLongClose({ duration });
+    return returnToWaitingInputFromLongClose({ duration, startedAt, endedAt });
   }
 
   return false;
@@ -4469,38 +4452,22 @@ function createHoldDetector({
 const gestureDetectors = {
   brow: createHoldDetector({
     name: "BROW_RAISE",
-    threshold: 0.1,
-    peakThreshold: 0.14,
-    minHoldMs: 250,
-    cooldownMs: 1300,
-    releaseMinMs: 90,
+    ...GESTURE_DETECTOR_PARAMS.brow,
     onTrigger: (event) => handleGestureEvent(event, "抬眉"),
   }),
   secondaryBrow: createHoldDetector({
     name: "BROW_RAISE",
-    threshold: 0.045,
-    peakThreshold: 0.065,
-    minHoldMs: 120,
-    cooldownMs: 900,
-    releaseMinMs: 40,
+    ...GESTURE_DETECTOR_PARAMS.secondaryBrow,
     onTrigger: (event) => handleGestureEvent(event, "抬眉"),
   }),
   mouth: createHoldDetector({
     name: "MOUTH_OPEN",
-    threshold: 0.055,
-    peakThreshold: 0.075,
-    minHoldMs: 180,
-    cooldownMs: 300,
-    releaseMinMs: 50,
+    ...GESTURE_DETECTOR_PARAMS.mouth,
     onTrigger: (event) => handleGestureEvent(event, "张嘴"),
   }),
   smile: createHoldDetector({
     name: "SMILE",
-    threshold: 0.09,
-    peakThreshold: 0.12,
-    minHoldMs: 250,
-    cooldownMs: 450,
-    releaseMinMs: 120,
+    ...GESTURE_DETECTOR_PARAMS.smile,
     onTrigger: (event) => handleGestureEvent(event, "微笑"),
   }),
 };
@@ -4530,7 +4497,7 @@ const headShakeDetector = {
 
     const direction = yaw > HEAD_SHAKE_YAW_THRESHOLD ? "right" : yaw < -HEAD_SHAKE_YAW_THRESHOLD ? "left" : "";
     if (!direction) {
-      if (this.windowStartedAt && now - this.windowStartedAt > 3200) {
+      if (this.windowStartedAt && now - this.windowStartedAt > HEAD_SHAKE_PARAMS.idleResetMs) {
         this.reset();
       }
       return;
@@ -4548,7 +4515,11 @@ const headShakeDetector = {
       this.motionUntil = now + SMILE_HEAD_MOTION_GUARD.settleMs;
     }
 
-    if (this.changeCount >= 2 && now - this.windowStartedAt <= 4000 && now - this.lastTriggerAt >= 1000) {
+    if (
+      this.changeCount >= HEAD_SHAKE_PARAMS.requiredDirectionChanges &&
+      now - this.windowStartedAt <= HEAD_SHAKE_PARAMS.windowMs &&
+      now - this.lastTriggerAt >= HEAD_SHAKE_PARAMS.cooldownMs
+    ) {
       const duration = now - this.windowStartedAt;
       const peakValue = Math.abs(yaw);
       this.lastTriggerAt = now;
@@ -4557,7 +4528,7 @@ const headShakeDetector = {
       handleGestureEvent({ name: "HEAD_SHAKE", duration, value: peakValue }, "摇头");
     }
 
-    if (this.windowStartedAt && now - this.windowStartedAt > 4000) {
+    if (this.windowStartedAt && now - this.windowStartedAt > HEAD_SHAKE_PARAMS.windowMs) {
       this.reset();
     }
   },

@@ -86,7 +86,7 @@ export const DEFAULT_ACTION_CONFIG = [
     label: "微笑",
     displayText: "谢谢，可以，我还好",
     speechText: "谢谢，可以，我还好",
-    instruction: "轻微闭嘴微笑约 0.25 秒后放松；明显张嘴或左右方向切换的摇头会短暂暂停微笑判断。",
+    instruction: "轻微闭嘴微笑并保持约 0.8 秒后放松；明显张嘴或左右方向切换的摇头会短暂暂停微笑判断。",
     category: "emotion",
     input: "smile",
     enabled: true,
@@ -169,7 +169,7 @@ export const ACTION_LOCALIZATION = {
       label: "Smile",
       displayText: "Thank you. OK. I am alright.",
       speechText: "Thank you. OK. I am alright.",
-      instruction: "Smile gently with the mouth closed for about 0.25 seconds, then relax. Clear mouth opening or side-to-side head motion temporarily pauses smile detection.",
+      instruction: "Smile gently with the mouth closed and hold for about 0.8 seconds, then relax. Clear mouth opening or side-to-side head motion temporarily pauses smile detection.",
       category: "emotion",
     },
     smile_double_love: {
