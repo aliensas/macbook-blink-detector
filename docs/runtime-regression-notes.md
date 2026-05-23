@@ -51,3 +51,35 @@ rg -n "pitchDelta|isHeadMotionSuppressingBrow|detectLoop|processFaceSignals" src
 ```
 
 然后在 Chrome 打开本地页面，点击“启动”，确认 5-10 秒内没有检测循环错误。
+
+## 2026-05-23：实验性 ROI 输入导致 MediaPipe 时间戳错误
+
+### 现象
+
+- 打开“实验性 ROI 识别”后点击“启动”。
+- 摄像头画面短暂闪出，随后黑屏。
+- 系统显示“检测失败”。
+- Chrome 控制台反复报错：
+
+```text
+Packet timestamp mismatch on a calculator receiving from stream "norm_rect"
+Current minimum expected timestamp is ... but received ...
+at detectFaceFrame
+at detectLoop
+```
+
+### 原因
+
+实验性 ROI 输入在原始 `video` 和隐藏 `canvas` 之间切换调用同一个 `FaceLandmarker.detectForVideo()`。传入的 `performance.now()` 小数时间在 MediaPipe 内部转换后可能出现非严格递增，导致计算图拒绝后续帧。这个错误会污染检测循环，连续重试后触发停止摄像头。
+
+### 处理
+
+当前已彻底移除实验性 ROI 输入，恢复为单一原始 `video` 输入路径。保留“人脸近景框”作为只读预览，不裁剪视频、不改变 Face Landmarker 输入、不参与动作触发。
+
+### 永久规则
+
+- 当前稳定版只允许一条检测输入路径：原始 `video`。
+- 任何未来新增的 `detectForVideo()` 调用都必须使用统一的单调递增时间戳。
+- 不允许在同一个检测帧里连续调用 ROI canvas 和原始 video 两次 `detectForVideo()`。
+- 实验功能不能直接把异常抛到主检测循环导致摄像头停止；必须有自动降级回稳定路径的保护。
+- ROI / canvas / 多输入源相关修改必须放在独立分支，且验证启动、停止、重启摄像头都不会黑屏后，才能讨论合并。
