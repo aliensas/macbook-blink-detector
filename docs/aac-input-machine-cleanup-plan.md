@@ -8,6 +8,7 @@
 - `tests/aac-input-machine.test.js` 已覆盖核心短码、菜单、确认、冷却、安静模式、质量门控和可选动作组合规则。
 - `src/main.js` 当前只把“眨眼短码最终解释”接入新内核。
 - 二级菜单 / 输入管理中的 `..` 选择已由新内核决定；旧 `resolveSecondarySelectionBlinkCode` 已删除，剩余的是单次短眨/长闭眼的忽略提示适配器。
+- 确认窗口中的 `..` 确认已由新内核决定；旧 `resolvePendingConfirmation` 已删除，剩余的是确认执行函数和忽略提示适配器。
 - 摄像头启动、EAR 眨眼识别、TTS、ROI 预览、抬眉/张嘴/微笑/摇头检测器尚未迁移。
 
 ## 已被新内核接管的规则
@@ -61,11 +62,10 @@
    - 当前状态：函数已删除。
    - 保留内容：仅保留 `handleSecondarySelectionIgnoredBlinkCode`，用于显示单次短眨/长闭眼被忽略的提示；它不再决定菜单选择。
 
-2. `resolvePendingConfirmation`
+2. 已完成：`resolvePendingConfirmation`
    - 旧职责：确认窗口中解释 `..`。
-   - 新职责应由 `aac-input-machine` 决定。
-   - 保留条件：现阶段仍负责执行原确认 UI 和播报。
-   - 删除时机：确认窗口整体接入新内核后。
+   - 当前状态：函数已删除。
+   - 保留内容：`executePendingConfirmationFromInputMachine` 只执行新内核发出的确认命令；`handlePendingConfirmationIgnoredBlinkCode` 只显示单次短眨/长闭眼被忽略的提示。
 
 3. `lockSecondarySelectionForBlink`
    - 旧职责：第一次短眨锁定菜单项。
@@ -101,8 +101,8 @@
 1. 已完成：建立纯输入内核和模拟测试。
 2. 已完成：眨眼短码最终解释接入新内核。
 3. 已完成：把二级菜单 / 输入管理中的 `..` 选择交给新内核，并删除 `resolveSecondarySelectionBlinkCode` 的旧解释分支。
-4. 下一步：把确认窗口短码消费交给新内核，然后删除 `resolvePendingConfirmation` 的旧解释分支。
-5. 再下一步：把浏览器定时器层逐步改成“事件直接送入新内核”，减少旧 `blinkCodeBuffer` 责任。
+4. 已完成：把确认窗口短码消费交给新内核，并删除 `resolvePendingConfirmation` 的旧解释分支。
+5. 下一步：把浏览器定时器层逐步改成“事件直接送入新内核”，减少旧 `blinkCodeBuffer` 责任。
 6. 最后：迁移抬眉、张嘴、微笑、摇头事件解释。
 
 ## 每一步必须通过的检查

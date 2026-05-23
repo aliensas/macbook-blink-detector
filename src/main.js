@@ -4120,23 +4120,28 @@ function executeBlinkEmergencyCode({ note = "emergency_blink_code" } = {}) {
   return true;
 }
 
-function resolvePendingConfirmation(code) {
+function executePendingConfirmationFromInputMachine(code = "..") {
   const pending = getActiveConfirmation();
   if (!pending) {
     return false;
   }
 
-  if (code === "..") {
-    if (!canTriggerCandidate("confirmation")) {
-      blockCandidateForFaceQuality("confirmation", pending.label || "确认");
-      return true;
-    }
-
-    clearPendingConfirmation();
-    announce(pending.confirmedText, `${pending.label}已确认`, { shouldSpeak: true });
-    rememberConsumedBlinkCode(code, "pending_confirmation_confirmed");
-    finishInputTurnAfterTerminalAction();
+  if (!canTriggerCandidate("confirmation")) {
+    blockCandidateForFaceQuality("confirmation", pending.label || "确认");
     return true;
+  }
+
+  clearPendingConfirmation();
+  announce(pending.confirmedText, `${pending.label}已确认`, { shouldSpeak: true });
+  rememberConsumedBlinkCode(code, "pending_confirmation_confirmed");
+  finishInputTurnAfterTerminalAction();
+  return true;
+}
+
+function handlePendingConfirmationIgnoredBlinkCode(code) {
+  const pending = getActiveConfirmation();
+  if (!pending) {
+    return false;
   }
 
   if (code === ".") {
@@ -4150,6 +4155,12 @@ function resolvePendingConfirmation(code) {
     setCommunicationMessage("单次长闭眼已忽略，请连续两次短眨确认，闭眼 3 秒取消。", pending.label);
     addLog(`${pending.label}：单次长闭眼已忽略`);
     finishPendingTestRecord({ note: "single_long_blink_ignored_in_confirmation" });
+    return true;
+  }
+
+  if (code === "..") {
+    addLog(`${pending.label}：两次短眨未被执行，已交由输入内核忽略`);
+    finishPendingTestRecord({ note: "confirmation_code_ignored_by_input_machine" });
     return true;
   }
 
@@ -4281,7 +4292,7 @@ function handleAacBlinkMachineIgnoredCode(code, { emergencyOnly = false } = {}) 
     return true;
   }
 
-  if (getActiveConfirmation() && resolvePendingConfirmation(code)) {
+  if (getActiveConfirmation() && handlePendingConfirmationIgnoredBlinkCode(code)) {
     return true;
   }
 
@@ -4338,7 +4349,7 @@ function applyAacBlinkMachineCommand(command, code, context) {
       }
       return false;
     case AAC_COMMANDS.CONFIRM:
-      return resolvePendingConfirmation("..");
+      return executePendingConfirmationFromInputMachine("..");
     case AAC_COMMANDS.BLOCKED:
       blockCandidateForFaceQuality(command.candidate || "ordinaryBlinkCode", "短码");
       return true;
