@@ -9,6 +9,7 @@
 - `src/main.js` 当前只把“眨眼短码最终解释”接入新内核。
 - 二级菜单 / 输入管理中的 `..` 选择已由新内核决定；旧 `resolveSecondarySelectionBlinkCode` 已删除，剩余的是单次短眨/长闭眼的忽略提示适配器。
 - 确认窗口中的 `..` 确认已由新内核决定；旧 `resolvePendingConfirmation` 已删除，剩余的是确认执行函数和忽略提示适配器。
+- `src/main.js` 的短码等待窗口、最长组合时长、冷却时长已改为读取 `DEFAULT_AAC_TIMING`，避免主页面和输入内核维护两份不同参数。
 - 摄像头启动、EAR 眨眼识别、TTS、ROI 预览、抬眉/张嘴/微笑/摇头检测器尚未迁移。
 
 ## 已被新内核接管的规则

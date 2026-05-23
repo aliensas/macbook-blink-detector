@@ -39,6 +39,7 @@ import {
   AAC_INPUT_EVENTS,
   AAC_INPUT_MODES,
   AAC_QUALITY_STATES,
+  DEFAULT_AAC_TIMING,
   createAacInputMachine,
 } from "./shared/aac-input-machine.js";
 import {
@@ -903,25 +904,18 @@ const BLINK_SYMBOLS = {
   shortMaxMs: 500,
   longMinMs: 700,
   longMaxMs: 2800,
-  decodeDelayMs: 1200,
+  decodeDelayMs: DEFAULT_AAC_TIMING.shortDecodeMs,
   closedDeferMs: 120,
-  finalDecodeDelayMs: 350,
-  inputManagementContinuationMs: 1600,
-  longSequenceDecodeDelayMs: 2200,
+  finalDecodeDelayMs: DEFAULT_AAC_TIMING.finalDecodeMs,
+  inputManagementContinuationMs: DEFAULT_AAC_TIMING.inputManagementContinuationMs,
+  longSequenceDecodeDelayMs: DEFAULT_AAC_TIMING.longDecodeMs,
 };
 const BLINK_SEQUENCE_TIMING = {
-  maxGapAfterShortMs: 1200,
-  maxGapAfterLongMs: 1600,
-  maxTotalMs: 6000,
+  maxGapAfterShortMs: DEFAULT_AAC_TIMING.maxGapAfterShortMs,
+  maxGapAfterLongMs: DEFAULT_AAC_TIMING.maxGapAfterLongMs,
+  maxTotalMs: DEFAULT_AAC_TIMING.ordinaryMaxTotalMs,
 };
-const BLINK_CODE_MAX_TOTAL_MS = {
-  "..": 2500,
-  "...": 4000,
-  ".-": 5000,
-  "-.": 5500,
-  "--": 9000,
-  "--.": 9000,
-};
+const BLINK_CODE_MAX_TOTAL_MS = DEFAULT_AAC_TIMING.codeMaxTotalMs;
 const CALIBRATION_BLINK_SAMPLE = {
   longMaxMs: 5000,
   timeoutMs: 10000,
@@ -935,11 +929,11 @@ const LONG_CLOSE_CONTROL = {
 };
 const ACTION_COOLDOWN_MS = {
   default: 1500,
-  terminal: 2000,
+  terminal: DEFAULT_AAC_TIMING.actionCooldownMs,
   secondarySelection: 1000,
 };
-const RECOVERY_COOLDOWN_MS = 900;
-const MENU_ACTION_COOLDOWN_MS = 700;
+const RECOVERY_COOLDOWN_MS = DEFAULT_AAC_TIMING.recoveryCooldownMs;
+const MENU_ACTION_COOLDOWN_MS = DEFAULT_AAC_TIMING.menuActionCooldownMs;
 const EMERGENCY_BLINK_CODE = "...";
 const SECONDARY_SELECTION_BLINK_LOCK_MS =
   BLINK_SEQUENCE_TIMING.maxGapAfterShortMs + BLINK_SYMBOLS.shortMaxMs + BLINK_SYMBOLS.decodeDelayMs + 250;
@@ -2324,6 +2318,12 @@ function rememberConsumedBlinkCode(code, reason = "") {
   state.recentlyConsumedBlinkCode.code = code;
   state.recentlyConsumedBlinkCode.until = performance.now() + CONSUMED_BLINK_CODE_SUPPRESS_MS;
   state.recentlyConsumedBlinkCode.reason = reason;
+}
+
+function clearRecentlyConsumedBlinkCode() {
+  state.recentlyConsumedBlinkCode.code = "";
+  state.recentlyConsumedBlinkCode.until = 0;
+  state.recentlyConsumedBlinkCode.reason = "";
 }
 
 function shouldSuppressRecentlyConsumedBlinkCode(code, now = performance.now()) {
@@ -4518,6 +4518,7 @@ function pauseRecognition({ preserveMessage = false } = {}) {
   state.pausedUntil = Number.POSITIVE_INFINITY;
   clearTransientCooldowns();
   clearBlinkCodeBuffer();
+  clearRecentlyConsumedBlinkCode();
   clearPendingConfirmation();
   clearSecondarySelection();
   resetGestureSequences();
@@ -4531,8 +4532,12 @@ function pauseRecognition({ preserveMessage = false } = {}) {
 function resumeRecognition() {
   state.pausedUntil = 0;
   clearTransientCooldowns();
+  clearBlinkCodeBuffer();
+  clearRecentlyConsumedBlinkCode();
   clearPendingConfirmation();
   clearSecondarySelection();
+  resetGestureSequences();
+  resetDetectionWindow();
   pauseRecognitionButton.querySelector("span").textContent = t("pauseRecognition");
   setCommunicationMessage("等待输入", "继续");
 }
@@ -5399,6 +5404,7 @@ async function startCamera(deviceId = state.selectedDeviceId) {
     resetDetectionWindow();
     clearTransientCooldowns();
     clearBlinkCodeBuffer();
+    clearRecentlyConsumedBlinkCode();
     clearPendingConfirmation();
     clearSecondarySelection();
     resetGestureSequences();
@@ -5453,6 +5459,7 @@ function stopCamera(clearStatus = true) {
     setStatus("已停止", "idle");
     resetDetectionWindow();
     clearBlinkCodeBuffer();
+    clearRecentlyConsumedBlinkCode();
     clearPendingConfirmation();
     clearSecondarySelection();
     resetGestureSequences();
@@ -5942,6 +5949,7 @@ function resetCounters() {
   clearTransientCooldowns();
   resetDetectionWindow();
   clearBlinkCodeBuffer();
+  clearRecentlyConsumedBlinkCode();
   clearPendingConfirmation();
   clearSecondarySelection();
   resetGestureSequences();
@@ -6066,6 +6074,7 @@ clearSpeechButton.addEventListener("click", () => {
   clearQuietMode();
   clearTransientCooldowns();
   clearBlinkCodeBuffer();
+  clearRecentlyConsumedBlinkCode();
   clearPendingConfirmation();
   clearSecondarySelection();
   resetGestureSequences();
