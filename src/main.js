@@ -232,7 +232,7 @@ const UI_TEXT = {
     notDetected: "未检测",
     eyeOpenness: "眼睛开合",
     faceQuality: "人脸质量",
-    faceQualityGate: "质量不足时暂停非紧急触发",
+    faceQualityGate: "质量不足时暂停可选面部动作",
     faceQualityInitial: "未见人脸",
     faceQualityInitialReason: "请让患者面部进入画面",
     camera: "摄像头",
@@ -350,7 +350,7 @@ const UI_TEXT = {
     notDetected: "Not detected",
     eyeOpenness: "Eye openness",
     faceQuality: "Face quality",
-    faceQualityGate: "Pause non-emergency triggers when quality is poor",
+    faceQualityGate: "Pause optional facial gestures when quality is poor",
     faceQualityInitial: "No face visible",
     faceQualityInitialReason: "Place the patient’s face in view",
     camera: "Camera",
@@ -596,12 +596,16 @@ const RUNTIME_TEXT_EN = {
   "人脸偏离中心": "Face is off center",
   "人脸接近画面边缘": "Face is near the edge",
   "人脸检测不稳定": "Face tracking is unstable",
+  "眼部关键点不稳定": "Eye landmarks are unstable",
+  "仅保留眼部输入": "Eye-only input",
   "质量不足，已暂停触发": "Quality too low; trigger paused",
   "人脸质量不足，请调整手机位置。": "Face quality is too low. Please adjust the phone position.",
   "请将手机靠近患者，或使用 2x 镜头。": "Move the phone closer to the patient, or use the 2x lens.",
   "请让患者面部靠近画面中心。": "Keep the patient’s face closer to the center.",
   "请保留完整眉毛、嘴部和下巴，不要贴近边缘。": "Keep the eyebrows, mouth, and chin fully in view, away from the edge.",
   "请固定手机或改善光线，等待画面稳定。": "Stabilize the phone or improve lighting, then wait for the view to settle.",
+  "检测质量不足，可选面部动作暂停；仍可使用眨眼短码、长闭眼退出和安静模式恢复。": "Quality is low. Optional facial gestures are paused; blink codes, long eye-closure exit, and quiet-mode recovery remain available.",
+  "眼部关键点不可稳定使用，患者动作已暂停。": "Eye landmarks are not stable enough. Patient actions are paused.",
   "人脸质量可用，但建议调整手机距离和角度。": "Face quality is usable, but phone distance and angle could be improved.",
   "人脸质量良好，可以识别。": "Face quality is good. Recognition is available.",
   "人脸质量门控已关闭": "Face quality gate is off",
@@ -879,7 +883,7 @@ const MOUTH_WIDTH_POINTS = [61, 291];
 const HEAD_YAW_POINTS = [1, 33, 263];
 
 const BLINK_SYMBOLS = {
-  shortMinMs: 100,
+  shortMinMs: 70,
   shortMaxMs: 500,
   longMinMs: 700,
   longMaxMs: 2800,
@@ -918,6 +922,8 @@ const ACTION_COOLDOWN_MS = {
   terminal: 2000,
   secondarySelection: 1000,
 };
+const RECOVERY_COOLDOWN_MS = 900;
+const MENU_ACTION_COOLDOWN_MS = 700;
 const EMERGENCY_BLINK_CODE = "...";
 const SECONDARY_SELECTION_BLINK_LOCK_MS =
   BLINK_SEQUENCE_TIMING.maxGapAfterShortMs + BLINK_SYMBOLS.shortMaxMs + BLINK_SYMBOLS.decodeDelayMs + 250;
@@ -942,7 +948,7 @@ const MOUTH_DOUBLE_WINDOW_MS = 2200;
 const MOUTH_BROW_SUPPRESS_THRESHOLD = 0.045;
 const MOUTH_SMILE_SUPPRESS_THRESHOLD = 0.16;
 const SMILE_MOUTH_SUPPRESS_THRESHOLD = 0.14;
-const SMILE_DOUBLE_WINDOW_MS = 2400;
+const SMILE_DOUBLE_WINDOW_MS = 1400;
 const SMILE_DOUBLE_MIN_GAP_MS = 550;
 const SMILE_WIDTH_DELTA_SCALE = 0.055;
 const HEAD_SHAKE_YAW_THRESHOLD = 0.022;
@@ -1063,6 +1069,7 @@ const state = {
   running: false,
   rafId: 0,
   lastVideoTime: -1,
+  detectionErrorCount: 0,
   selectedDeviceId: "",
   blinkTotal: 0,
   closedFrames: 0,
@@ -1081,6 +1088,8 @@ const state = {
   blinkCodeLastAt: null,
   blinkCodeDurations: [],
   actionCooldownUntil: 0,
+  recoveryCooldownUntil: 0,
+  menuActionCooldownUntil: 0,
   secondarySelection: {
     active: false,
     groupId: "",
@@ -1097,6 +1106,7 @@ const state = {
     until: 0,
     reason: "",
   },
+  lastCalibrationGateFeedbackAt: 0,
   fpsSamples: [],
   lastFps: null,
   lastSignals: null,
@@ -1228,6 +1238,8 @@ function snapshotSignals() {
     headPitchDelta: Number.isFinite(signals.headPitchDelta) ? Number(signals.headPitchDelta.toFixed(4)) : null,
     faceQualityLevel: state.faceQuality?.level || null,
     faceQualityReason: state.faceQuality?.reason || null,
+    faceQualityTriggerPolicy: state.faceQuality?.triggerPolicy || null,
+    eyesUsable: typeof state.faceQuality?.eyesUsable === "boolean" ? state.faceQuality.eyesUsable : null,
     faceQualityScore: Number.isFinite(state.faceQuality?.score) ? Number(state.faceQuality.score.toFixed(4)) : null,
     faceHeightRatio: Number.isFinite(state.faceQuality?.metrics?.heightRatio)
       ? Number(state.faceQuality.metrics.heightRatio.toFixed(4))
@@ -1238,6 +1250,10 @@ function snapshotSignals() {
     faceJitter: Number.isFinite(state.faceQuality?.metrics?.jitter)
       ? Number(state.faceQuality.metrics.jitter.toFixed(4))
       : null,
+    faceEyeSpanRatio: Number.isFinite(state.faceQuality?.metrics?.eyeSpanRatio)
+      ? Number(state.faceQuality.metrics.eyeSpanRatio.toFixed(4))
+      : null,
+    currentMode: getInteractionMode(),
     hasFace: Boolean(signals.hasFace),
   };
 }
@@ -1499,10 +1515,14 @@ function exportRecordingCsv() {
     "headPitchDelta",
     "faceQualityLevel",
     "faceQualityReason",
+    "faceQualityTriggerPolicy",
+    "eyesUsable",
     "faceQualityScore",
     "faceHeightRatio",
     "faceCenterOffset",
     "faceJitter",
+    "faceEyeSpanRatio",
+    "currentMode",
     "text",
     "note",
   ];
@@ -1572,6 +1592,13 @@ function faceQualityCopy(quality = state.faceQuality) {
     };
   }
 
+  if (quality.triggerPolicy === "eyesOnly") {
+    return {
+      label: "仅保留眼部输入",
+      reason: "检测质量不足，可选面部动作暂停；仍可使用眨眼短码、长闭眼退出和安静模式恢复。",
+    };
+  }
+
   const labelByReason = {
     missing: "未见人脸",
     tooSmall: "人脸偏小",
@@ -1580,6 +1607,7 @@ function faceQualityCopy(quality = state.faceQuality) {
     nearEdge: "人脸接近画面边缘",
     unstable: "人脸检测不稳定",
     slightlyUnstable: "人脸检测不稳定",
+    eyesUnstable: "眼部关键点不稳定",
   };
 
   const reasonByReason = {
@@ -1590,6 +1618,7 @@ function faceQualityCopy(quality = state.faceQuality) {
     nearEdge: "请保留完整眉毛、嘴部和下巴，不要贴近边缘。",
     unstable: "请固定手机或改善光线，等待画面稳定。",
     slightlyUnstable: "请固定手机或改善光线，等待画面稳定。",
+    eyesUnstable: "眼部关键点不可稳定使用，患者动作已暂停。",
   };
 
   return {
@@ -2400,6 +2429,13 @@ function selectInputManagementOption(option, sourceLabel = "短眨选择") {
     return false;
   }
 
+  if (isMenuActionCooldownActive() && sourceLabel !== "手动点击") {
+    clearSecondarySelectionLock({ resumeScan: true, render: true });
+    addLog(`输入管理：菜单内冷却中，已忽略 ${sourceLabel}`);
+    finishPendingTestRecord({ note: "menu_action_cooldown_suppressed" });
+    return true;
+  }
+
   if (option.type === "exit") {
     clearSecondarySelection();
     announce("已退出输入管理", group.label, { shouldSpeak: true });
@@ -2432,7 +2468,8 @@ function selectInputManagementOption(option, sourceLabel = "短眨选择") {
   scheduleSecondarySelectionScan();
   announce(text, group.label, { shouldSpeak: true });
   addLog(`输入管理：${text}（${sourceLabel}）`);
-  startActionCooldown(ACTION_COOLDOWN_MS.secondarySelection);
+  startMenuActionCooldown();
+  startActionCooldown(MENU_ACTION_COOLDOWN_MS);
   return true;
 }
 
@@ -2503,6 +2540,19 @@ function resolveSecondarySelectionBlinkCode(code) {
   }
 
   if (code === "..") {
+    if (isMenuActionCooldownActive()) {
+      clearSecondarySelectionLock({ resumeScan: true, render: true });
+      addLog("二级选择：菜单内冷却中，已忽略两次短眨选择");
+      finishPendingTestRecord({ note: "menu_action_cooldown_suppressed" });
+      return true;
+    }
+
+    if (!canTriggerCandidate("secondarySelect")) {
+      clearSecondarySelectionLock({ resumeScan: true, render: true });
+      blockCandidateForFaceQuality("secondarySelect", "二级选择");
+      return true;
+    }
+
     if (selectSecondarySelection(undefined, currentLanguage === "en" ? "two short blinks" : "两次短眨")) {
       rememberConsumedBlinkCode(code, "secondary_selection_select");
     }
@@ -2552,7 +2602,11 @@ function announceAction(action, label = action?.label || "") {
   }
 }
 
-function executeConfiguredAction(action, label = action?.label || "", { bypassCooldown = false } = {}) {
+function executeConfiguredAction(
+  action,
+  label = action?.label || "",
+  { bypassCooldown = false, candidateType = "ordinaryBlinkCode" } = {},
+) {
   if (!action) {
     return false;
   }
@@ -2563,8 +2617,8 @@ function executeConfiguredAction(action, label = action?.label || "", { bypassCo
     return true;
   }
 
-  if (shouldBlockActionForFaceQuality(action)) {
-    return blockActionForFaceQuality(label);
+  if (shouldBlockActionForFaceQuality(action, candidateType)) {
+    return blockActionForFaceQuality(label, action?.category === "emergency" ? "emergencyBlink" : candidateType);
   }
 
   const secondaryGroup = secondarySelectionGroupForAction(action);
@@ -2820,32 +2874,143 @@ function startActionCooldown(ms = ACTION_COOLDOWN_MS.default) {
   state.actionCooldownUntil = Math.max(state.actionCooldownUntil, performance.now() + ms);
 }
 
+function clearRecoveryCooldown() {
+  state.recoveryCooldownUntil = 0;
+}
+
+function isRecoveryCooldownActive(now = performance.now()) {
+  return now < state.recoveryCooldownUntil;
+}
+
+function startRecoveryCooldown(ms = RECOVERY_COOLDOWN_MS) {
+  state.recoveryCooldownUntil = Math.max(state.recoveryCooldownUntil, performance.now() + ms);
+}
+
+function clearMenuActionCooldown() {
+  state.menuActionCooldownUntil = 0;
+}
+
+function isMenuActionCooldownActive(now = performance.now()) {
+  return now < state.menuActionCooldownUntil;
+}
+
+function startMenuActionCooldown(ms = MENU_ACTION_COOLDOWN_MS) {
+  state.menuActionCooldownUntil = Math.max(state.menuActionCooldownUntil, performance.now() + ms);
+}
+
+function getInteractionMode(now = performance.now()) {
+  if (state.quietMode.active) {
+    return "QUIET";
+  }
+
+  if (isGuidedCalibrationInProgress() || state.calibration.activeTestCode) {
+    return "CALIBRATION_OR_TEST";
+  }
+
+  if (state.secondarySelection.active && state.secondarySelection.groupId === "inputChannels") {
+    return "INPUT_MANAGEMENT";
+  }
+
+  if (state.secondarySelection.active) {
+    return "SECONDARY_MENU";
+  }
+
+  if (state.pendingConfirmation) {
+    return "CONFIRM_WINDOW";
+  }
+
+  if (isRecoveryCooldownActive(now)) {
+    return "RECOVERY_COOLDOWN";
+  }
+
+  if (isActionCooldownActive(now)) {
+    return "COOLDOWN";
+  }
+
+  return "WAITING";
+}
+
+function faceQualityTriggerPolicy(quality = state.faceQuality) {
+  if (!isFaceQualityGateEnabled()) {
+    return "all";
+  }
+
+  return quality?.triggerPolicy || (quality?.blocking ? "none" : "all");
+}
+
+const EYE_BASED_CANDIDATES = new Set([
+  "ordinaryBlinkCode",
+  "emergencyBlink",
+  "inputManagement",
+  "secondarySelect",
+  "confirmation",
+  "longCloseExit",
+  "longCloseQuiet",
+  "quietRecovery",
+]);
+
+function canTriggerCandidate(candidate, { quality = state.faceQuality } = {}) {
+  if (EYE_BASED_CANDIDATES.has(candidate)) {
+    return true;
+  }
+
+  const policy = faceQualityTriggerPolicy(quality);
+  if (policy === "all") {
+    return true;
+  }
+
+  return false;
+}
+
+function faceQualityBlockReason(quality = state.faceQuality) {
+  return quality?.triggerPolicy || quality?.reason || "unknown";
+}
+
+function blockCandidateForFaceQuality(candidate, label = "动作", { preserveMessage = true } = {}) {
+  const reason = faceQualityBlockReason();
+  if (!preserveMessage) {
+    setCommunicationMessage("人脸质量不足，请调整手机位置。", "人脸质量");
+  } else {
+    lastGesture.textContent = localizeRuntimeText("质量不足，已暂停触发");
+  }
+  addLog(`${label}：质量策略 ${reason} 已阻断 ${candidate}`);
+  finishPendingTestRecord({
+    label,
+    text: preserveMessage ? undefined : "人脸质量不足，请调整手机位置。",
+    note: `face_quality_blocked:${candidate}:${reason}`,
+  });
+  return true;
+}
+
 function isFaceQualityGateEnabled() {
   return faceQualityGateToggle?.checked ?? true;
 }
 
-function shouldBlockActionForFaceQuality(action) {
-  if (!isFaceQualityGateEnabled() || action?.category === "emergency") {
+function shouldBlockActionForFaceQuality(action, candidate = "ordinaryBlinkCode") {
+  if (!isFaceQualityGateEnabled()) {
     return false;
   }
 
-  return Boolean(state.faceQuality?.blocking);
+  const candidateType = action?.category === "emergency" ? "emergencyBlink" : candidate;
+  return !canTriggerCandidate(candidateType);
 }
 
-function blockActionForFaceQuality(label = "动作") {
+function blockActionForFaceQuality(label = "动作", candidate = "ordinaryBlinkCode") {
   setCommunicationMessage("人脸质量不足，请调整手机位置。", "人脸质量");
   addLog(`${label}：质量不足，已暂停触发`);
   finishPendingTestRecord({
     label,
     text: "人脸质量不足，请调整手机位置。",
-    note: `face_quality_blocked:${state.faceQuality?.reason || "unknown"}`,
+    note: `face_quality_blocked:${candidate}:${faceQualityBlockReason()}`,
   });
-  finishInputTurnAfterTerminalAction({ cooldownMs: ACTION_COOLDOWN_MS.terminal });
+  clearBlinkCodeBuffer();
+  resetGestureSequences();
+  markInputWaiting({ preserveMessage: true });
   return true;
 }
 
 function suppressGestureEventForFaceQuality(event, label = "动作") {
-  if (!isFaceQualityGateEnabled() || !state.faceQuality?.blocking) {
+  if (!isFaceQualityGateEnabled() || faceQualityTriggerPolicy() === "all") {
     return false;
   }
 
@@ -2855,23 +3020,22 @@ function suppressGestureEventForFaceQuality(event, label = "动作") {
   if (event.name === "BROW_RAISE" && (activeSecondary || activeConfirmation)) {
     lastGesture.textContent = localizeRuntimeText("质量不足，已暂停触发");
     addLog(`${label}：当前模式中因人脸质量不足已忽略`);
-    finishPendingTestRecord({ note: `face_quality_blocked:${state.faceQuality.reason}` });
+    finishPendingTestRecord({ note: `face_quality_blocked:secondary_or_confirmation:${faceQualityBlockReason()}` });
     return true;
   }
 
   if (event.name === "HEAD_SHAKE" && (activeSecondary || activeConfirmation)) {
     lastGesture.textContent = localizeRuntimeText("质量不足，已暂停触发");
     addLog(`${label}：当前模式中因人脸质量不足已忽略`);
-    finishPendingTestRecord({ note: `face_quality_blocked:${state.faceQuality.reason}` });
+    finishPendingTestRecord({ note: `face_quality_blocked:secondary_or_confirmation:${faceQualityBlockReason()}` });
     return true;
   }
 
   if (event.name === "MOUTH_OPEN" || event.name === "SMILE") {
     setCommunicationMessage("人脸质量不足，请调整手机位置。", "人脸质量");
     addLog(`${label}：质量不足，未进入动作组合`);
-    finishPendingTestRecord({ note: `face_quality_blocked:${state.faceQuality.reason}` });
+    finishPendingTestRecord({ note: `face_quality_blocked:optionalGesture:${faceQualityBlockReason()}` });
     resetGestureSequences();
-    startActionCooldown(ACTION_COOLDOWN_MS.secondarySelection);
     markInputWaiting({ preserveMessage: true });
     return true;
   }
@@ -2881,6 +3045,12 @@ function suppressGestureEventForFaceQuality(event, label = "动作") {
 
 function clearActionCooldown() {
   state.actionCooldownUntil = 0;
+}
+
+function clearTransientCooldowns() {
+  clearActionCooldown();
+  clearRecoveryCooldown();
+  clearMenuActionCooldown();
 }
 
 function markInputWaiting({ preserveMessage = true } = {}) {
@@ -2899,6 +3069,8 @@ function finishInputTurnAfterTerminalAction({ cooldownMs = ACTION_COOLDOWN_MS.te
   clearSecondarySelection();
   resetGestureSequences();
   resetDetectionWindow();
+  clearRecoveryCooldown();
+  clearMenuActionCooldown();
   startActionCooldown(cooldownMs);
   markInputWaiting({ preserveMessage });
 }
@@ -2968,6 +3140,8 @@ function enterQuietModeFromLongClose({ duration, startedAt, endedAt }) {
   clearPendingConfirmation();
   clearSecondarySelection();
   resetGestureSequences();
+  clearRecoveryCooldown();
+  clearMenuActionCooldown();
   state.quietMode.active = true;
   clearQuietModeRecovery();
   setCommunicationMessage("系统安静中，连续短眨 4 次恢复文字和语音播报。", "系统安静模式");
@@ -3010,7 +3184,8 @@ function handleSustainedLongCloseWhileClosed(now) {
     state.blinkClosureConsumed ||
     state.quietMode.active ||
     isGuidedCalibrationInProgress() ||
-    state.blinkClosedObservedMs < LONG_CLOSE_CONTROL.quietMinMs
+    state.blinkClosedObservedMs < LONG_CLOSE_CONTROL.quietMinMs ||
+    !canTriggerCandidate("longCloseQuiet")
   ) {
     return false;
   }
@@ -3031,10 +3206,18 @@ function handleLongCloseControl(duration, startedAt, endedAt) {
   }
 
   if (duration >= LONG_CLOSE_CONTROL.quietMinMs) {
+    if (!canTriggerCandidate("longCloseQuiet")) {
+      blockCandidateForFaceQuality("longCloseQuiet", "长闭眼安静模式");
+      return true;
+    }
     return enterQuietModeFromLongClose({ duration, startedAt, endedAt });
   }
 
   if (duration >= LONG_CLOSE_CONTROL.exitMinMs) {
+    if (!canTriggerCandidate("longCloseExit")) {
+      blockCandidateForFaceQuality("longCloseExit", "长闭眼退出");
+      return true;
+    }
     if (hasLongCloseExitContext()) {
       return returnToWaitingInputFromLongClose({ duration, startedAt, endedAt });
     }
@@ -3051,6 +3234,7 @@ function resumeFromQuietMode() {
   clearPendingConfirmation();
   clearSecondarySelection();
   resetGestureSequences();
+  startRecoveryCooldown();
   announce("已恢复，等待输入", "已恢复", { shouldSpeak: true });
   addLog("连续 4 次短眨：已恢复文字和语音播报");
 }
@@ -3090,6 +3274,11 @@ function scheduleQuietModeRecoveryTimeout(count) {
 function handleQuietModeBlinkCandidate(duration, now) {
   if (!state.quietMode.active) {
     return false;
+  }
+
+  if (!canTriggerCandidate("quietRecovery")) {
+    addLog(`安静模式恢复短眨因质量策略 ${faceQualityBlockReason()} 已忽略`);
+    return true;
   }
 
   if (duration < BLINK_SYMBOLS.shortMinMs || duration > BLINK_SYMBOLS.shortMaxMs) {
@@ -3165,6 +3354,36 @@ function guidedTestProgressText() {
 
 function hasConfirmedCalibration() {
   return hasCompletedCoreCalibration() && state.calibration.confirmed;
+}
+
+function requiresConfirmedCalibrationForActionMapping() {
+  return PLATFORM_MODE === "ios";
+}
+
+function canUseActionMapping() {
+  return !requiresConfirmedCalibrationForActionMapping() || hasConfirmedCalibration();
+}
+
+function isActionMappingBlockedByCalibration() {
+  if (state.calibration.collecting && currentCalibrationStep().kind !== "test") {
+    return true;
+  }
+
+  return requiresConfirmedCalibrationForActionMapping() && state.calibration.active && !state.calibration.confirmed;
+}
+
+function showCalibrationActionGateFeedback(sourceLabel = "动作") {
+  const now = performance.now();
+  if (now - state.lastCalibrationGateFeedbackAt < 1500) {
+    return;
+  }
+
+  state.lastCalibrationGateFeedbackAt = now;
+  setCommunicationMessage(
+    `${sourceLabel}已识别；当前仍在校准流程中，不触发通信动作。完成核心校准后请点击“完成确认”。`,
+    "校准保护",
+  );
+  addLog(`${sourceLabel}已识别，但校准尚未确认，未触发通信动作`);
 }
 
 function showIosCalibrationGateHint({ afterCameraStart = false } = {}) {
@@ -3274,7 +3493,10 @@ function loadSavedCalibrationProfile() {
 
   const holdFrames = Number(payload.holdFrames);
   if (Number.isFinite(holdFrames)) {
-    const clampedHoldFrames = Math.round(clamp(holdFrames, Number(holdFramesRange.min), Number(holdFramesRange.max)));
+    const clampedHoldFrames = Math.min(
+      2,
+      Math.round(clamp(holdFrames, Number(holdFramesRange.min), Number(holdFramesRange.max))),
+    );
     holdFramesRange.value = clampedHoldFrames.toString();
     holdFramesValue.textContent = clampedHoldFrames.toString();
   }
@@ -3416,7 +3638,7 @@ function updateCalibrationUI() {
 function resetCalibration() {
   cancelSpeech();
   clearQuietMode();
-  clearActionCooldown();
+  clearTransientCooldowns();
   clearBlinkCodeBuffer();
   clearPendingConfirmation();
   clearSecondarySelection();
@@ -3443,7 +3665,7 @@ function resetCalibration() {
 function startCalibrationGuide() {
   cancelSpeech();
   clearQuietMode();
-  clearActionCooldown();
+  clearTransientCooldowns();
   clearBlinkCodeBuffer();
   clearPendingConfirmation();
   resetGestureSequences();
@@ -3776,7 +3998,7 @@ function startGuidedTest() {
   }
 
   clearBlinkCodeBuffer();
-  clearActionCooldown();
+  clearTransientCooldowns();
   clearPendingConfirmation();
   resetGestureSequences();
   state.calibration.activeTestCode = guidedTestSelect.value;
@@ -3869,7 +4091,12 @@ function getActiveConfirmation(now = performance.now()) {
 }
 
 function openInputManagementFromBlinkCode({ note = "input_management_started" } = {}) {
-  if (!hasConfirmedCalibration()) {
+  if (!canTriggerCandidate("inputManagement")) {
+    blockCandidateForFaceQuality("inputManagement", "输入管理");
+    return true;
+  }
+
+  if (!canUseActionMapping()) {
     setCommunicationMessage("输入管理短码已识别；完成并确认引导校准后才打开菜单。", "未确认");
     addLog("输入管理短码已识别，因引导校准未确认而未打开");
     finishPendingTestRecord({ note: "calibration_not_confirmed" });
@@ -3890,20 +4117,28 @@ function executeBlinkEmergencyCode({ note = "emergency_blink_code" } = {}) {
     return true;
   }
 
-  if (!hasConfirmedCalibration()) {
+  if (!canUseActionMapping()) {
     setCommunicationMessage(`短码 ${displayBlinkCode(EMERGENCY_BLINK_CODE)} 已识别；完成并确认引导校准后才播报短语。`, "未确认");
     addLog("紧急求助短码已识别，因引导校准未确认而未播报");
     finishPendingTestRecord({ note: "calibration_not_confirmed" });
     return true;
   }
 
+  if (shouldBlockActionForFaceQuality(action, "emergencyBlink")) {
+    blockCandidateForFaceQuality("emergencyBlink", action.label || `短码 ${displayBlinkCode(EMERGENCY_BLINK_CODE)}`, {
+      preserveMessage: false,
+    });
+    return true;
+  }
+
   clearQuietMode();
-  clearActionCooldown();
+  clearTransientCooldowns();
   clearPendingConfirmation();
   clearSecondarySelection();
   addLog(`紧急求助短码已触发（${note}）`);
   executeConfiguredAction(action, action.label || `短码 ${displayBlinkCode(EMERGENCY_BLINK_CODE)}`, {
     bypassCooldown: true,
+    candidateType: "emergencyBlink",
   });
   return true;
 }
@@ -3915,6 +4150,11 @@ function resolvePendingConfirmation(code) {
   }
 
   if (code === "..") {
+    if (!canTriggerCandidate("confirmation")) {
+      blockCandidateForFaceQuality("confirmation", pending.label || "确认");
+      return true;
+    }
+
     clearPendingConfirmation();
     announce(pending.confirmedText, `${pending.label}已确认`, { shouldSpeak: true });
     rememberConsumedBlinkCode(code, "pending_confirmation_confirmed");
@@ -3990,8 +4230,9 @@ function decodeBlinkCode() {
   }
 
   if (emergencyOnly && code !== EMERGENCY_BLINK_CODE) {
-    addLog(`冷却期只监听紧急短码，${displayBlinkCode(code)} 已静默忽略`);
-    finishPendingTestRecord({ note: "cooldown_emergency_only_ignored" });
+    addLog(`当前仅监听紧急短码，${displayBlinkCode(code)} 已静默忽略`);
+    clearSecondarySelectionLock({ resumeScan: true, render: true });
+    finishPendingTestRecord({ note: "emergency_only_buffer_ignored" });
     return;
   }
 
@@ -4038,7 +4279,7 @@ function decodeBlinkCode() {
 
   const action = getActionConfigByGestureId(gestureId);
   if (action) {
-    if (!hasConfirmedCalibration()) {
+    if (!canUseActionMapping()) {
       setCommunicationMessage(`短码 ${displayBlinkCode(code)} 已识别；完成并确认引导校准后才播报短语。`, "未确认");
       addLog(`短码 ${displayBlinkCode(code)} 已识别，因引导校准未确认而未播报`);
       finishPendingTestRecord({ note: "calibration_not_confirmed" });
@@ -4060,14 +4301,19 @@ function enqueueBlinkSymbol(symbol, meta = {}) {
     return;
   }
 
-  if (state.calibration.active && !state.calibration.confirmed && currentCalibrationStep().kind !== "test") {
+  if (isActionMappingBlockedByCalibration()) {
+    showCalibrationActionGateFeedback(`短码 ${displayBlinkCode(symbol)}`);
     return;
   }
 
   const isGuidedBlinkTest = state.calibration.activeTestCode && currentCalibrationStep().kind === "test";
   const modalConsumesBlink = Boolean(getActiveSecondarySelection(now) || getActiveConfirmation(now));
-  const cooldownEmergencyOnly = !isGuidedBlinkTest && !modalConsumesBlink && isActionCooldownActive(now);
-  if (cooldownEmergencyOnly && symbol !== ".") {
+  const menuCooldownEmergencyOnly = modalConsumesBlink && isMenuActionCooldownActive(now);
+  const emergencyOnlyBuffer =
+    !isGuidedBlinkTest &&
+    (menuCooldownEmergencyOnly ||
+      (!modalConsumesBlink && (isActionCooldownActive(now) || isRecoveryCooldownActive(now))));
+  if (emergencyOnlyBuffer && symbol !== ".") {
     return;
   }
 
@@ -4077,7 +4323,7 @@ function enqueueBlinkSymbol(symbol, meta = {}) {
     state.blinkCodeStartedAt = meta.actionStartedAtMs ?? meta.actionEndedAtMs ?? now;
     state.blinkCodeDurations = [];
   }
-  if (cooldownEmergencyOnly) {
+  if (emergencyOnlyBuffer) {
     state.blinkCodeEmergencyOnly = true;
   }
   state.blinkCodeLastAt = meta.actionEndedAtMs ?? now;
@@ -4085,7 +4331,7 @@ function enqueueBlinkSymbol(symbol, meta = {}) {
     state.blinkCodeDurations.push(meta.durationMs);
   }
   state.blinkCodeBuffer.push(symbol);
-  if (symbol === "." && state.blinkCodeBuffer.length === 1) {
+  if (symbol === "." && state.blinkCodeBuffer.length === 1 && !emergencyOnlyBuffer) {
     lockSecondarySelectionForBlink(now);
   }
   if (state.blinkCodeBuffer.length > 3) {
@@ -4122,7 +4368,7 @@ function getBlinkDecodeDelay() {
 
 function pauseRecognition({ preserveMessage = false } = {}) {
   state.pausedUntil = Number.POSITIVE_INFINITY;
-  clearActionCooldown();
+  clearTransientCooldowns();
   clearBlinkCodeBuffer();
   clearPendingConfirmation();
   clearSecondarySelection();
@@ -4136,7 +4382,7 @@ function pauseRecognition({ preserveMessage = false } = {}) {
 
 function resumeRecognition() {
   state.pausedUntil = 0;
-  clearActionCooldown();
+  clearTransientCooldowns();
   clearPendingConfirmation();
   clearSecondarySelection();
   pauseRecognitionButton.querySelector("span").textContent = t("pauseRecognition");
@@ -4345,7 +4591,7 @@ function handleSmileGesture(event, label) {
 
   if (!doubleSmileAction) {
     recordGestureAction(event, label);
-    executeConfiguredAction(singleSmileAction, singleSmileAction.label);
+    executeConfiguredAction(singleSmileAction, singleSmileAction.label, { candidateType: "optionalGesture" });
     return;
   }
 
@@ -4363,7 +4609,7 @@ function handleSmileGesture(event, label) {
     state.gestureSequences.smileTimer = 0;
     state.gestureSequences.smilePending = null;
     recordGestureAction(event, doubleSmileAction.label, EVENT_GESTURE_IDS.SMILE_DOUBLE, detectedAt);
-    executeConfiguredAction(doubleSmileAction, doubleSmileAction.label);
+    executeConfiguredAction(doubleSmileAction, doubleSmileAction.label, { candidateType: "optionalGesture" });
     return;
   }
 
@@ -4384,7 +4630,7 @@ function handleSmileGesture(event, label) {
     }
 
     recordGestureAction(pending.event, pending.label, EVENT_GESTURE_IDS.SMILE, pending.detectedAt);
-    executeConfiguredAction(singleSmileAction, singleSmileAction.label);
+    executeConfiguredAction(singleSmileAction, singleSmileAction.label, { candidateType: "optionalGesture" });
   }, SMILE_DOUBLE_WINDOW_MS);
 }
 
@@ -4394,7 +4640,7 @@ function handleGestureEvent(event, label) {
     return;
   }
 
-  if (event.name !== "SMILE" || state.calibration.activeTestCode || !hasConfirmedCalibration()) {
+  if (event.name !== "SMILE" || state.calibration.activeTestCode || !canUseActionMapping()) {
     recordGestureAction(event, label);
   }
 
@@ -4405,14 +4651,29 @@ function handleGestureEvent(event, label) {
     return;
   }
 
-  if (!hasConfirmedCalibration()) {
+  if (!canUseActionMapping()) {
     setCommunicationMessage(`检测到${label}；完成并确认引导校准后才启用动作映射。`, `${label}候选`);
     addLog(`${label}候选：${Math.round(event.duration)}ms，峰值 ${(event.value || 0).toFixed(2)}，校准未确认未播报`);
     finishPendingTestRecord({ note: "calibration_not_confirmed" });
     return;
   }
 
-  if (isActionCooldownActive()) {
+  const activeSecondary = Boolean(getActiveSecondarySelection());
+  const activeConfirmation = Boolean(state.pendingConfirmation);
+
+  if (isRecoveryCooldownActive()) {
+    addLog(`${label}动作：恢复冷却中，已忽略`);
+    finishPendingTestRecord({ note: "recovery_cooldown_suppressed" });
+    return;
+  }
+
+  if (isMenuActionCooldownActive() && activeSecondary) {
+    addLog(`${label}动作：菜单内冷却中，已忽略`);
+    finishPendingTestRecord({ note: "menu_action_cooldown_suppressed" });
+    return;
+  }
+
+  if (isActionCooldownActive() && !activeSecondary && !activeConfirmation) {
     addLog(`${label}动作：输入回合冷却中，已忽略`);
     finishPendingTestRecord({ note: "action_cooldown_suppressed" });
     return;
@@ -4430,7 +4691,7 @@ function handleGestureEvent(event, label) {
       return;
     }
     const action = getActionConfigByGestureId(EVENT_GESTURE_IDS.BROW_RAISE);
-    executeConfiguredAction(action, action?.label || label);
+    executeConfiguredAction(action, action?.label || label, { candidateType: "optionalGesture" });
     return;
   }
 
@@ -4464,7 +4725,7 @@ function handleGestureEvent(event, label) {
     window.clearTimeout(state.gestureSequences.mouthOpenTimer);
     state.gestureSequences.mouthOpenTimer = 0;
     resetGestureSequences();
-    executeConfiguredAction(action, action?.label || "张嘴2次");
+    executeConfiguredAction(action, action?.label || "张嘴2次", { candidateType: "optionalGesture" });
     return;
   }
 
@@ -4496,7 +4757,7 @@ function handleGestureEvent(event, label) {
       return;
     }
     const action = getActionConfigByGestureId(EVENT_GESTURE_IDS.HEAD_SHAKE);
-    executeConfiguredAction(action, action?.label || label);
+    executeConfiguredAction(action, action?.label || label, { candidateType: "optionalGesture" });
   }
 }
 
@@ -4739,10 +5000,10 @@ function isHeadMotionSuppressingBrow(signals, detectionSignals, now) {
     return false;
   }
 
-  const pitchDelta = Math.abs(detectionSignals.headPitchDelta || 0);
   const pitchJump = Number.isFinite(guard.lastPitch) ? Math.abs(pitch - guard.lastPitch) : 0;
   const centerJump =
     Number.isFinite(guard.lastCenterY) && Number.isFinite(centerY) ? Math.abs(centerY - guard.lastCenterY) : 0;
+  const pitchDelta = Math.abs(detectionSignals.headPitchDelta || 0);
 
   guard.lastPitch = pitch;
   guard.lastCenterY = Number.isFinite(centerY) ? centerY : null;
@@ -4838,9 +5099,9 @@ async function refreshCameraList({ preserveSelection = true, shouldLog = false }
 
 function cameraConstraints(deviceId = "") {
   const base = {
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
-    frameRate: { ideal: 30, max: 60 },
+    width: { ideal: 960, max: 1280 },
+    height: { ideal: 540, max: 720 },
+    frameRate: { ideal: 30, max: 30 },
   };
 
   if (deviceId) {
@@ -4854,16 +5115,13 @@ function cameraConstraints(deviceId = "") {
   }
 
   return {
-    video: {
-      ...base,
-      facingMode: "user",
-    },
+    video: base,
     audio: false,
   };
 }
 
 async function getInitialPermission() {
-  const stream = await navigator.mediaDevices.getUserMedia(cameraConstraints());
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
   stream.getTracks().forEach((track) => track.stop());
 }
 
@@ -4979,7 +5237,9 @@ async function startCamera(deviceId = state.selectedDeviceId) {
     try {
       stream = await navigator.mediaDevices.getUserMedia(cameraConstraints(preferredDeviceId));
     } catch (error) {
-      if (!preferredDeviceId || error.name !== "OverconstrainedError") {
+      const canRetryDefault =
+        preferredDeviceId && ["OverconstrainedError", "NotFoundError", "NotReadableError"].includes(error.name);
+      if (!canRetryDefault) {
         throw error;
       }
 
@@ -4996,11 +5256,12 @@ async function startCamera(deviceId = state.selectedDeviceId) {
     await enumerateCameras(deviceId || stream.getVideoTracks()[0]?.getSettings().deviceId);
     resizeCanvas();
     state.running = true;
+    state.detectionErrorCount = 0;
     state.lastVideoTime = -1;
     state.lastFrameAt = performance.now();
     state.fpsSamples = [];
     resetDetectionWindow();
-    clearActionCooldown();
+    clearTransientCooldowns();
     clearBlinkCodeBuffer();
     clearPendingConfirmation();
     clearSecondarySelection();
@@ -5172,8 +5433,15 @@ function detectLoop() {
       updateFps();
       drawOverlay(landmarks);
       processFaceSignals(signals, performance.now());
+      state.detectionErrorCount = 0;
     } catch (error) {
       console.error(error);
+      state.detectionErrorCount += 1;
+      if (state.detectionErrorCount <= 5) {
+        addLog(`检测循环短暂错误 ${state.detectionErrorCount}/5：${error.message || error.name || "未知错误"}`);
+        state.rafId = requestAnimationFrame(detectLoop);
+        return;
+      }
       setStatus("检测失败", "error");
       addLog("检测循环出现错误，已暂停");
       stopCamera(false);
@@ -5283,7 +5551,7 @@ function processFaceSignals(signals, now) {
     blinkState.textContent = localizeRuntimeText("闭眼");
   }
 
-  if (!isClosed && !state.blinkArmed && state.openFrames >= 2) {
+  if (!isClosed && !state.blinkArmed && state.openFrames >= 1) {
     state.blinkTotal += 1;
     blinkCount.textContent = state.blinkTotal.toString();
     blinkState.textContent = localizeRuntimeText("眨眼");
@@ -5324,7 +5592,7 @@ function processFaceSignals(signals, now) {
     return;
   }
 
-  if (isFaceQualityGateEnabled() && state.faceQuality?.blocking) {
+  if (isFaceQualityGateEnabled() && faceQualityTriggerPolicy() === "none") {
     lastGesture.textContent = localizeRuntimeText("质量不足，已暂停触发");
     resetGestureSequences();
     gestureDetectors.brow.reset();
@@ -5535,7 +5803,7 @@ function drawOverlay(landmarks) {
 function resetCounters() {
   state.blinkTotal = 0;
   clearQuietMode();
-  clearActionCooldown();
+  clearTransientCooldowns();
   resetDetectionWindow();
   clearBlinkCodeBuffer();
   clearPendingConfirmation();
@@ -5660,7 +5928,7 @@ secondarySelectionCancelButton?.addEventListener("click", () => {
 clearSpeechButton.addEventListener("click", () => {
   cancelSpeech();
   clearQuietMode();
-  clearActionCooldown();
+  clearTransientCooldowns();
   clearBlinkCodeBuffer();
   clearPendingConfirmation();
   clearSecondarySelection();

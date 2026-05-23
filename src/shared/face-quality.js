@@ -3,6 +3,8 @@ const DEFAULT_QUALITY = Object.freeze({
   reason: "missing",
   score: 0,
   blocking: true,
+  eyesUsable: false,
+  triggerPolicy: "none",
   metrics: {
     widthRatio: 0,
     heightRatio: 0,
@@ -10,8 +12,11 @@ const DEFAULT_QUALITY = Object.freeze({
     centerOffset: 1,
     edgeMargin: 0,
     jitter: 0,
+    eyeSpanRatio: 0,
   },
 });
+
+const EYE_ANCHOR_POINTS = [33, 133, 362, 263, 159, 145, 386, 374];
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
@@ -70,6 +75,39 @@ function computeFrameJitter(previousFrame, bounds) {
   return centerShift + scaleShift * 0.04;
 }
 
+function distance(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function hasLandmarkIndices(landmarks, indices) {
+  return indices.every((index) => {
+    const point = landmarks?.[index];
+    return point && Number.isFinite(point.x) && Number.isFinite(point.y);
+  });
+}
+
+function computeEyeSpanRatio(landmarks) {
+  if (!hasLandmarkIndices(landmarks, EYE_ANCHOR_POINTS)) {
+    return 0;
+  }
+
+  const leftOuter = landmarks[33];
+  const rightOuter = landmarks[263];
+  return distance(leftOuter, rightOuter);
+}
+
+function computeEyesUsable(landmarks, bounds, jitter) {
+  const eyeSpanRatio = computeEyeSpanRatio(landmarks);
+  const eyesUsable =
+    eyeSpanRatio >= 0.075 &&
+    bounds.heightRatio >= 0.16 &&
+    bounds.areaRatio >= 0.02 &&
+    bounds.edgeMargin >= -0.04 &&
+    jitter <= 0.11;
+
+  return { eyesUsable, eyeSpanRatio };
+}
+
 function scoreFaceQuality(bounds, jitter) {
   let score = 1;
   score -= clamp((0.26 - bounds.heightRatio) / 0.16, 0, 1) * 0.34;
@@ -80,40 +118,63 @@ function scoreFaceQuality(bounds, jitter) {
   return clamp(score, 0, 1);
 }
 
-function classifyQuality(bounds, jitter) {
+function withTriggerPolicy(classification, eyesUsable) {
+  if (!eyesUsable) {
+    return {
+      ...classification,
+      level: "poor",
+      reason: classification.reason === "good" ? "eyesUnstable" : classification.reason,
+      blocking: true,
+      eyesUsable,
+      triggerPolicy: "none",
+    };
+  }
+
+  if (classification.blocking) {
+    return {
+      ...classification,
+      eyesUsable,
+      triggerPolicy: eyesUsable ? "eyesOnly" : "none",
+    };
+  }
+
+  return { ...classification, eyesUsable, triggerPolicy: "all" };
+}
+
+function classifyQuality(bounds, jitter, eyesUsable) {
   if (bounds.heightRatio < 0.18 || bounds.areaRatio < 0.025) {
-    return { level: "poor", reason: "tooSmall", blocking: true };
+    return withTriggerPolicy({ level: "poor", reason: "tooSmall", blocking: true }, eyesUsable);
   }
 
   if (bounds.centerOffset > 0.42) {
-    return { level: "poor", reason: "offCenter", blocking: true };
+    return withTriggerPolicy({ level: "poor", reason: "offCenter", blocking: true }, eyesUsable);
   }
 
   if (bounds.edgeMargin < -0.03) {
-    return { level: "poor", reason: "nearEdge", blocking: true };
+    return withTriggerPolicy({ level: "poor", reason: "nearEdge", blocking: true }, eyesUsable);
   }
 
   if (jitter > 0.08) {
-    return { level: "poor", reason: "unstable", blocking: true };
+    return withTriggerPolicy({ level: "poor", reason: "unstable", blocking: true }, eyesUsable);
   }
 
   if (bounds.heightRatio < 0.26 || bounds.areaRatio < 0.05) {
-    return { level: "usable", reason: "small", blocking: false };
+    return withTriggerPolicy({ level: "usable", reason: "small", blocking: false }, eyesUsable);
   }
 
   if (bounds.centerOffset > 0.3) {
-    return { level: "usable", reason: "offCenter", blocking: false };
+    return withTriggerPolicy({ level: "usable", reason: "offCenter", blocking: false }, eyesUsable);
   }
 
   if (bounds.edgeMargin < 0.045) {
-    return { level: "usable", reason: "nearEdge", blocking: false };
+    return withTriggerPolicy({ level: "usable", reason: "nearEdge", blocking: false }, eyesUsable);
   }
 
   if (jitter > 0.045) {
-    return { level: "usable", reason: "slightlyUnstable", blocking: false };
+    return withTriggerPolicy({ level: "usable", reason: "slightlyUnstable", blocking: false }, eyesUsable);
   }
 
-  return { level: "good", reason: "good", blocking: false };
+  return withTriggerPolicy({ level: "good", reason: "good", blocking: false }, eyesUsable);
 }
 
 export function createFaceQualityTracker({ jitterWindow = 8 } = {}) {
@@ -144,7 +205,8 @@ export function createFaceQualityTracker({ jitterWindow = 8 } = {}) {
 
       const jitter =
         jitterSamples.length > 1 ? jitterSamples.reduce((sum, value) => sum + value, 0) / jitterSamples.length : 0;
-      const classification = classifyQuality(bounds, jitter);
+      const eyeQuality = computeEyesUsable(landmarks, bounds, jitter);
+      const classification = classifyQuality(bounds, jitter, eyeQuality.eyesUsable);
 
       return {
         ...classification,
@@ -156,6 +218,7 @@ export function createFaceQualityTracker({ jitterWindow = 8 } = {}) {
           centerOffset: bounds.centerOffset,
           edgeMargin: bounds.edgeMargin,
           jitter,
+          eyeSpanRatio: eyeQuality.eyeSpanRatio,
         },
       };
     },
