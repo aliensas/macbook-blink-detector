@@ -654,7 +654,6 @@ const RUNTIME_TEXT_EN = {
   "导入失败，请检查 JSON 文件。": "Import failed. Please check the JSON file.",
   "当前未启用动作输入。": "No action input is currently enabled.",
   "二级选择已取消": "Secondary selection canceled",
-  "二级选择中收到紧急求助短码，已退出二级选择": "Emergency blink code received during secondary selection. Secondary selection exited.",
   "二级选择：忽略单次短眨": "Secondary selection: single short blink ignored",
   "二级选择中忽略张嘴动作": "Mouth-open action ignored during secondary selection",
   "二级选择中忽略微笑动作": "Smile action ignored during secondary selection",
@@ -745,7 +744,6 @@ function localizeRuntimeText(text) {
     .replace(/^短码过长 (.+)，已静默忽略$/, "Blink code too long ($1), silently ignored")
     .replace(/^未识别短码 (.+)，已静默忽略$/, "Unrecognized blink code ($1), silently ignored")
     .replace(/^系统安静中，连续短眨 4 次恢复（(\d+)\/4）$/, "System quiet mode. Blink shortly 4 times to resume ($1/4).")
-    .replace(/^张嘴一次已记录，请在 6 秒内再次微张嘴表达“(.+)”。$/, "One mouth-open action recorded. Open the mouth slightly again within 6 seconds to express “$1.”")
     .replace(/^微笑一次已记录；完全放松约半秒后再次微笑会表达“(.+)”。$/, "One smile recorded. Relax fully for about half a second, then smile again to express “$1.”")
     .replace(/^检测到(.+)；完成并确认引导校准后才启用动作映射。$/, "$1 detected. Action mapping is enabled only after guided calibration is confirmed.")
     .replace(/^短码测试中，(.+)动作已记录但不执行。$/, "$1 recorded during blink-code testing but not executed.")
@@ -896,6 +894,14 @@ const BLINK_SEQUENCE_TIMING = {
   maxGapAfterLongMs: 1600,
   maxTotalMs: 6000,
 };
+const BLINK_CODE_MAX_TOTAL_MS = {
+  "..": 2500,
+  "...": 4000,
+  ".-": 5000,
+  "-.": 5500,
+  "--": 9000,
+  "--.": 9000,
+};
 const CALIBRATION_BLINK_SAMPLE = {
   longMaxMs: 5000,
   timeoutMs: 10000,
@@ -912,6 +918,9 @@ const ACTION_COOLDOWN_MS = {
   terminal: 2000,
   secondarySelection: 1000,
 };
+const EMERGENCY_BLINK_CODE = "...";
+const SECONDARY_SELECTION_BLINK_LOCK_MS =
+  BLINK_SEQUENCE_TIMING.maxGapAfterShortMs + BLINK_SYMBOLS.shortMaxMs + BLINK_SYMBOLS.decodeDelayMs + 250;
 
 const ACTION_CONFIG = createActionConfig(currentLanguage);
 const SECONDARY_SELECTION_GROUPS = createSecondarySelectionGroups(currentLanguage);
@@ -929,7 +938,7 @@ const OPTIONAL_INPUT_CHANNELS = {
   head: { toggle: headShakeToggle, ...OPTIONAL_INPUT_CHANNEL_DEFINITIONS.head },
 };
 const CONFIRMATION_TIMEOUT_MS = 10 * 1000;
-const MOUTH_DOUBLE_WINDOW_MS = 6000;
+const MOUTH_DOUBLE_WINDOW_MS = 2200;
 const MOUTH_BROW_SUPPRESS_THRESHOLD = 0.045;
 const MOUTH_SMILE_SUPPRESS_THRESHOLD = 0.16;
 const SMILE_MOUTH_SUPPRESS_THRESHOLD = 0.14;
@@ -1067,6 +1076,7 @@ const state = {
   blinkCodeBuffer: [],
   blinkDecodeTimer: 0,
   blinkCodeOverflow: false,
+  blinkCodeEmergencyOnly: false,
   blinkCodeStartedAt: null,
   blinkCodeLastAt: null,
   blinkCodeDurations: [],
@@ -1078,6 +1088,9 @@ const state = {
     startedAt: 0,
     expiresAt: 0,
     scanTimer: 0,
+    lockedIndex: null,
+    lockTimer: 0,
+    lockStartedAt: 0,
   },
   recentlyConsumedBlinkCode: {
     code: "",
@@ -1096,6 +1109,8 @@ const state = {
     active: false,
     resumeBlinkCount: 0,
     resumeStartedAt: 0,
+    resumeLastAt: 0,
+    resumeTimer: 0,
   },
   lastPhrase: "等待输入",
   pendingConfirmation: null,
@@ -1122,6 +1137,7 @@ const state = {
   },
   gestureSequences: {
     mouthOpenTimes: [],
+    mouthOpenTimer: 0,
     smileTimer: 0,
     smilePending: null,
   },
@@ -1630,7 +1646,11 @@ function resetSignalBaseline() {
 }
 
 function resetGestureSequences() {
+  if (state.gestureSequences.mouthOpenTimer) {
+    window.clearTimeout(state.gestureSequences.mouthOpenTimer);
+  }
   state.gestureSequences.mouthOpenTimes = [];
+  state.gestureSequences.mouthOpenTimer = 0;
   resetSmileSequence();
 }
 
@@ -2159,7 +2179,7 @@ function secondarySelectionOptionLabel(group, option) {
 
 function renderSecondarySelectionOptionButton(group, option, index) {
   const optionButton = document.createElement("button");
-  optionButton.className = `secondary-selection-option${index === state.secondarySelection.index ? " is-active" : ""}`;
+  optionButton.className = `secondary-selection-option${index === secondarySelectionCurrentIndex() ? " is-active" : ""}`;
   optionButton.type = "button";
   optionButton.dataset.index = String(index);
   optionButton.textContent = secondarySelectionOptionLabel(group, option);
@@ -2168,7 +2188,7 @@ function renderSecondarySelectionOptionButton(group, option, index) {
 
 function renderPatientSecondaryOption(group, option, index) {
   const item = document.createElement("span");
-  item.className = `patient-secondary-option${index === state.secondarySelection.index ? " is-active" : ""}`;
+  item.className = `patient-secondary-option${index === secondarySelectionCurrentIndex() ? " is-active" : ""}`;
   item.textContent = secondarySelectionOptionLabel(group, option);
   return item;
 }
@@ -2208,7 +2228,7 @@ function renderPatientSecondarySelectionBar(group) {
     return;
   }
 
-  const activeOption = group.options[state.secondarySelection.index] || group.options[0];
+  const activeOption = group.options[secondarySelectionCurrentIndex()] || group.options[0];
   patientSecondaryBar.hidden = false;
   patientSecondaryTitle.textContent = group.label;
   patientSecondaryHint.textContent = t("patientSecondaryHint");
@@ -2230,6 +2250,43 @@ function renderSecondarySelection() {
 function clearSecondarySelectionTimer() {
   window.clearTimeout(state.secondarySelection.scanTimer);
   state.secondarySelection.scanTimer = 0;
+}
+
+function clearSecondarySelectionLock({ resumeScan = false, render = false } = {}) {
+  window.clearTimeout(state.secondarySelection.lockTimer);
+  state.secondarySelection.lockTimer = 0;
+  state.secondarySelection.lockedIndex = null;
+  state.secondarySelection.lockStartedAt = 0;
+  if (render) {
+    renderSecondarySelection();
+  }
+  if (resumeScan && state.secondarySelection.active) {
+    scheduleSecondarySelectionScan();
+  }
+}
+
+function secondarySelectionCurrentIndex() {
+  return state.secondarySelection.lockedIndex ?? state.secondarySelection.index;
+}
+
+function lockSecondarySelectionForBlink(now = performance.now()) {
+  const group = getActiveSecondarySelection(now);
+  if (!group || state.secondarySelection.lockedIndex !== null) {
+    return false;
+  }
+
+  state.secondarySelection.lockedIndex = state.secondarySelection.index;
+  state.secondarySelection.lockStartedAt = now;
+  clearSecondarySelectionTimer();
+  window.clearTimeout(state.secondarySelection.lockTimer);
+  state.secondarySelection.lockTimer = window.setTimeout(() => {
+    clearSecondarySelectionLock({ resumeScan: true, render: true });
+    addLog("二级选择：单次短眨超时，已解除锁定并继续轮询");
+  }, SECONDARY_SELECTION_BLINK_LOCK_MS);
+  renderSecondarySelection();
+  const lockedOption = group.options[state.secondarySelection.lockedIndex];
+  addLog(`二级选择：已锁定当前项 ${lockedOption ? secondarySelectionOptionLabel(group, lockedOption) : "--"}`);
+  return true;
 }
 
 function rememberConsumedBlinkCode(code, reason = "") {
@@ -2255,7 +2312,7 @@ function shouldSuppressRecentlyConsumedBlinkCode(code, now = performance.now()) 
 
 function scheduleSecondarySelectionScan() {
   clearSecondarySelectionTimer();
-  if (!state.secondarySelection.active) {
+  if (!state.secondarySelection.active || state.secondarySelection.lockedIndex !== null) {
     return;
   }
 
@@ -2283,6 +2340,7 @@ function advanceSecondarySelection() {
 
 function clearSecondarySelection({ render = true } = {}) {
   clearSecondarySelectionTimer();
+  clearSecondarySelectionLock();
   state.secondarySelection.active = false;
   state.secondarySelection.groupId = "";
   state.secondarySelection.index = 0;
@@ -2368,6 +2426,7 @@ function selectInputManagementOption(option, sourceLabel = "短眨选择") {
     return false;
   }
 
+  clearSecondarySelectionLock();
   clearSecondarySelectionTimer();
   renderSecondarySelection();
   scheduleSecondarySelectionScan();
@@ -2377,7 +2436,7 @@ function selectInputManagementOption(option, sourceLabel = "短眨选择") {
   return true;
 }
 
-function selectSecondarySelection(index = state.secondarySelection.index, sourceLabel = "短眨选择") {
+function selectSecondarySelection(index = secondarySelectionCurrentIndex(), sourceLabel = "短眨选择") {
   const group = activeSecondarySelectionGroup();
   if (!group) {
     return false;
@@ -2443,12 +2502,6 @@ function resolveSecondarySelectionBlinkCode(code) {
     return false;
   }
 
-  if (code === "...") {
-    clearSecondarySelection();
-    addLog("二级选择中收到紧急求助短码，已退出二级选择");
-    return false;
-  }
-
   if (code === "..") {
     if (selectSecondarySelection(undefined, currentLanguage === "en" ? "two short blinks" : "两次短眨")) {
       rememberConsumedBlinkCode(code, "secondary_selection_select");
@@ -2457,6 +2510,7 @@ function resolveSecondarySelectionBlinkCode(code) {
   }
 
   if (code === ".") {
+    clearSecondarySelectionLock({ resumeScan: true, render: true });
     setCommunicationMessage("单次短眨已忽略；两次短眨选择当前项，闭眼 3 秒退出。", "二级选择");
     addLog("二级选择：忽略单次短眨");
     finishPendingTestRecord({ note: "single_short_blink_ignored_in_secondary_selection" });
@@ -2464,6 +2518,7 @@ function resolveSecondarySelectionBlinkCode(code) {
   }
 
   if (code === "-") {
+    clearSecondarySelectionLock({ resumeScan: true, render: true });
     setCommunicationMessage("单次长闭眼已忽略；两次短眨选择当前项，闭眼 3 秒退出。", "二级选择");
     addLog("二级选择：忽略单次长闭眼");
     finishPendingTestRecord({ note: "single_long_blink_ignored_in_secondary_selection" });
@@ -2471,6 +2526,7 @@ function resolveSecondarySelectionBlinkCode(code) {
   }
 
   addLog(`二级选择：短码 ${code} 已静默忽略`);
+  clearSecondarySelectionLock({ resumeScan: true, render: true });
   finishPendingTestRecord({ note: "unrecognized_code_in_secondary_selection" });
   return true;
 }
@@ -2496,12 +2552,12 @@ function announceAction(action, label = action?.label || "") {
   }
 }
 
-function executeConfiguredAction(action, label = action?.label || "") {
+function executeConfiguredAction(action, label = action?.label || "", { bypassCooldown = false } = {}) {
   if (!action) {
     return false;
   }
 
-  if (isActionCooldownActive()) {
+  if (!bypassCooldown && isActionCooldownActive()) {
     addLog(`${label}：指令冷却中，已忽略重复触发`);
     finishPendingTestRecord({ note: "action_cooldown_suppressed" });
     return true;
@@ -2707,6 +2763,7 @@ function clearBlinkCodeBuffer() {
   window.clearTimeout(state.blinkDecodeTimer);
   state.blinkCodeBuffer = [];
   state.blinkCodeOverflow = false;
+  state.blinkCodeEmergencyOnly = false;
   state.blinkCodeStartedAt = null;
   state.blinkCodeLastAt = null;
   state.blinkCodeDurations = [];
@@ -2717,12 +2774,16 @@ function blinkSequenceMaxGapAfter(symbol) {
   return symbol === "-" ? BLINK_SEQUENCE_TIMING.maxGapAfterLongMs : BLINK_SEQUENCE_TIMING.maxGapAfterShortMs;
 }
 
+function blinkSequenceMaxTotalForCode(code) {
+  return BLINK_CODE_MAX_TOTAL_MS[code] ?? BLINK_SEQUENCE_TIMING.maxTotalMs;
+}
+
 function blinkSequenceGapDescription(previousSymbol, gap) {
   const previousLabel = previousSymbol === "-" ? "长闭眼" : "短眨眼";
   return `${previousLabel}后间隔 ${Math.round(gap)}ms 超时，已静默清空短码`;
 }
 
-function resetBlinkCodeBufferIfSequenceIsStale(meta, now) {
+function resetBlinkCodeBufferIfSequenceIsStale(meta, now, nextSymbol = "") {
   if (state.blinkCodeBuffer.length === 0) {
     return false;
   }
@@ -2741,7 +2802,8 @@ function resetBlinkCodeBufferIfSequenceIsStale(meta, now) {
   const sequenceStartedAt = state.blinkCodeStartedAt ?? nextStartedAt;
   const sequenceEndedAt = meta.actionEndedAtMs ?? now;
   const totalDuration = sequenceEndedAt - sequenceStartedAt;
-  if (Number.isFinite(totalDuration) && totalDuration > BLINK_SEQUENCE_TIMING.maxTotalMs) {
+  const candidateCode = `${state.blinkCodeBuffer.join("")}${nextSymbol}`;
+  if (Number.isFinite(totalDuration) && totalDuration > blinkSequenceMaxTotalForCode(candidateCode)) {
     addLog(`短码组合总时长 ${Math.round(totalDuration)}ms 超时，已静默清空短码`);
     clearBlinkCodeBuffer();
     return true;
@@ -2842,8 +2904,11 @@ function finishInputTurnAfterTerminalAction({ cooldownMs = ACTION_COOLDOWN_MS.te
 }
 
 function clearQuietModeRecovery() {
+  window.clearTimeout(state.quietMode.resumeTimer);
+  state.quietMode.resumeTimer = 0;
   state.quietMode.resumeBlinkCount = 0;
   state.quietMode.resumeStartedAt = 0;
+  state.quietMode.resumeLastAt = 0;
 }
 
 function clearQuietMode() {
@@ -2990,6 +3055,38 @@ function resumeFromQuietMode() {
   addLog("连续 4 次短眨：已恢复文字和语音播报");
 }
 
+function handleQuietModeRecoveryTimeout(expectedCount) {
+  state.quietMode.resumeTimer = 0;
+  if (!state.quietMode.active || state.quietMode.resumeBlinkCount !== expectedCount) {
+    return;
+  }
+
+  if (state.blinkWasClosed || state.blinkClosedAt !== null) {
+    state.quietMode.resumeTimer = window.setTimeout(
+      () => handleQuietModeRecoveryTimeout(expectedCount),
+      BLINK_SYMBOLS.closedDeferMs,
+    );
+    return;
+  }
+
+  clearQuietModeRecovery();
+  if (expectedCount === 3) {
+    executeBlinkEmergencyCode({ note: "quiet_mode_emergency_after_three_short_blinks" });
+    return;
+  }
+
+  setCommunicationMessage("系统安静中，连续短眨 4 次恢复文字和语音播报。", "系统安静模式");
+  addLog("系统安静模式恢复短眨超时，已重新计数");
+}
+
+function scheduleQuietModeRecoveryTimeout(count) {
+  window.clearTimeout(state.quietMode.resumeTimer);
+  state.quietMode.resumeTimer = window.setTimeout(
+    () => handleQuietModeRecoveryTimeout(count),
+    BLINK_SEQUENCE_TIMING.maxGapAfterShortMs,
+  );
+}
+
 function handleQuietModeBlinkCandidate(duration, now) {
   if (!state.quietMode.active) {
     return false;
@@ -3000,17 +3097,27 @@ function handleQuietModeBlinkCandidate(duration, now) {
     return true;
   }
 
-  if (!state.quietMode.resumeStartedAt || now - state.quietMode.resumeStartedAt > LONG_CLOSE_CONTROL.resumeWindowMs) {
+  const gapFromLast = state.quietMode.resumeLastAt ? now - state.quietMode.resumeLastAt : 0;
+  if (
+    !state.quietMode.resumeStartedAt ||
+    now - state.quietMode.resumeStartedAt > LONG_CLOSE_CONTROL.resumeWindowMs ||
+    gapFromLast > BLINK_SEQUENCE_TIMING.maxGapAfterShortMs
+  ) {
+    window.clearTimeout(state.quietMode.resumeTimer);
+    state.quietMode.resumeTimer = 0;
     state.quietMode.resumeStartedAt = now;
     state.quietMode.resumeBlinkCount = 0;
   }
 
   state.quietMode.resumeBlinkCount += 1;
+  state.quietMode.resumeLastAt = now;
   const count = state.quietMode.resumeBlinkCount;
   if (count >= LONG_CLOSE_CONTROL.resumeBlinkCount) {
     resumeFromQuietMode();
     return true;
   }
+
+  scheduleQuietModeRecoveryTimeout(count);
 
   setCommunicationMessage(`系统安静中，连续短眨 4 次恢复（${count}/4）`, "系统安静模式");
   addLog(`系统安静模式恢复短眨 ${count}/${LONG_CLOSE_CONTROL.resumeBlinkCount}`);
@@ -3775,6 +3882,32 @@ function openInputManagementFromBlinkCode({ note = "input_management_started" } 
   return true;
 }
 
+function executeBlinkEmergencyCode({ note = "emergency_blink_code" } = {}) {
+  const action = getActionConfigByGestureId(BLINK_CODE_GESTURE_IDS[EMERGENCY_BLINK_CODE]);
+  if (!action) {
+    addLog("紧急求助短码已识别，但没有启用对应语义");
+    finishPendingTestRecord({ note: "emergency_action_config_missing" });
+    return true;
+  }
+
+  if (!hasConfirmedCalibration()) {
+    setCommunicationMessage(`短码 ${displayBlinkCode(EMERGENCY_BLINK_CODE)} 已识别；完成并确认引导校准后才播报短语。`, "未确认");
+    addLog("紧急求助短码已识别，因引导校准未确认而未播报");
+    finishPendingTestRecord({ note: "calibration_not_confirmed" });
+    return true;
+  }
+
+  clearQuietMode();
+  clearActionCooldown();
+  clearPendingConfirmation();
+  clearSecondarySelection();
+  addLog(`紧急求助短码已触发（${note}）`);
+  executeConfiguredAction(action, action.label || `短码 ${displayBlinkCode(EMERGENCY_BLINK_CODE)}`, {
+    bypassCooldown: true,
+  });
+  return true;
+}
+
 function resolvePendingConfirmation(code) {
   const pending = getActiveConfirmation();
   if (!pending) {
@@ -3827,6 +3960,7 @@ function decodeBlinkCode() {
   const actionStartedAt = state.blinkCodeStartedAt;
   const actionEndedAt = state.blinkCodeLastAt ?? decodedAt;
   const durations = [...state.blinkCodeDurations];
+  const emergencyOnly = state.blinkCodeEmergencyOnly;
   recordTestAction({
     type: "blink_code",
     source: "blink",
@@ -3855,7 +3989,18 @@ function decodeBlinkCode() {
     return;
   }
 
+  if (emergencyOnly && code !== EMERGENCY_BLINK_CODE) {
+    addLog(`冷却期只监听紧急短码，${displayBlinkCode(code)} 已静默忽略`);
+    finishPendingTestRecord({ note: "cooldown_emergency_only_ignored" });
+    return;
+  }
+
   if (shouldSuppressRecentlyConsumedBlinkCode(code, decodedAt)) {
+    return;
+  }
+
+  if (code === EMERGENCY_BLINK_CODE) {
+    executeBlinkEmergencyCode({ note: emergencyOnly ? "cooldown_emergency_bypass" : "normal_emergency" });
     return;
   }
 
@@ -3920,21 +4065,29 @@ function enqueueBlinkSymbol(symbol, meta = {}) {
   }
 
   const isGuidedBlinkTest = state.calibration.activeTestCode && currentCalibrationStep().kind === "test";
-  if (!isGuidedBlinkTest && isActionCooldownActive(now)) {
+  const modalConsumesBlink = Boolean(getActiveSecondarySelection(now) || getActiveConfirmation(now));
+  const cooldownEmergencyOnly = !isGuidedBlinkTest && !modalConsumesBlink && isActionCooldownActive(now);
+  if (cooldownEmergencyOnly && symbol !== ".") {
     return;
   }
 
-  resetBlinkCodeBufferIfSequenceIsStale(meta, now);
+  resetBlinkCodeBufferIfSequenceIsStale(meta, now, symbol);
 
   if (state.blinkCodeBuffer.length === 0) {
     state.blinkCodeStartedAt = meta.actionStartedAtMs ?? meta.actionEndedAtMs ?? now;
     state.blinkCodeDurations = [];
+  }
+  if (cooldownEmergencyOnly) {
+    state.blinkCodeEmergencyOnly = true;
   }
   state.blinkCodeLastAt = meta.actionEndedAtMs ?? now;
   if (Number.isFinite(meta.durationMs)) {
     state.blinkCodeDurations.push(meta.durationMs);
   }
   state.blinkCodeBuffer.push(symbol);
+  if (symbol === "." && state.blinkCodeBuffer.length === 1) {
+    lockSecondarySelectionForBlink(now);
+  }
   if (state.blinkCodeBuffer.length > 3) {
     state.blinkCodeOverflow = true;
   }
@@ -4297,13 +4450,19 @@ function handleGestureEvent(event, label) {
     state.gestureSequences.mouthOpenTimes.push(now);
 
     if (state.gestureSequences.mouthOpenTimes.length < 2) {
-      const targetText = getActionText(action) || "张嘴两次含义";
-      setCommunicationMessage(`张嘴一次已记录，请在 6 秒内再次微张嘴表达“${targetText}”。`, "张嘴 1/2");
-      addLog(`${label} 1/2：${Math.round(event.duration)}ms，等待第二次张嘴`);
+      window.clearTimeout(state.gestureSequences.mouthOpenTimer);
+      state.gestureSequences.mouthOpenTimer = window.setTimeout(() => {
+        state.gestureSequences.mouthOpenTimes = [];
+        state.gestureSequences.mouthOpenTimer = 0;
+        addLog("张嘴 1/2 超时，已静默清空");
+      }, MOUTH_DOUBLE_WINDOW_MS);
+      addLog(`${label} 1/2：${Math.round(event.duration)}ms，等待 ${MOUTH_DOUBLE_WINDOW_MS}ms 内第二次张嘴`);
       finishPendingTestRecord({ note: "mouth_open_1_of_2" });
       return;
     }
 
+    window.clearTimeout(state.gestureSequences.mouthOpenTimer);
+    state.gestureSequences.mouthOpenTimer = 0;
     resetGestureSequences();
     executeConfiguredAction(action, action?.label || "张嘴2次");
     return;

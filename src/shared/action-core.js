@@ -73,7 +73,7 @@ export const DEFAULT_ACTION_CONFIG = [
     label: "张嘴2次",
     displayText: "我需要吸痰，请马上查看",
     speechText: "我需要吸痰，请马上查看",
-    instruction: "微张嘴约 0.2 秒后闭合，6 秒内重复两次。",
+    instruction: "微张嘴约 0.2 秒后闭合，约 2 秒内重复两次；单次张嘴会静默清空。",
     category: "care",
     input: "mouth",
     enabled: true,
@@ -162,7 +162,7 @@ export const ACTION_LOCALIZATION = {
       label: "Open mouth twice",
       displayText: "I need suctioning, please check now.",
       speechText: "I need suctioning, please check now.",
-      instruction: "Open the mouth slightly for about 0.2 seconds, then close. Repeat twice within 6 seconds.",
+      instruction: "Open the mouth slightly for about 0.2 seconds, then close. Repeat twice within about 2 seconds; a single mouth-open is cleared silently.",
       category: "care",
     },
     smile_status: {
