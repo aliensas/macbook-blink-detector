@@ -451,11 +451,11 @@ export class AacInputMachine {
     this.blinkLastAt = this.now;
     this.blinkEmergencyOnly = this.blinkEmergencyOnly || emergencyOnly;
 
-    if (symbol === "." && this.blinkBuffer.length === 1 && !emergencyOnly) {
-      this.lockMenuForFirstShortBlink(commands);
+    const code = this.blinkBuffer.join("");
+    if (code === ".." && !emergencyOnly) {
+      this.lockMenuForSecondShortBlink(commands);
     }
 
-    const code = this.blinkBuffer.join("");
     if (!this.isValidBlinkPrefix(code) && !COMPLETE_BLINK_CODES.has(code)) {
       this.clearBlinkBuffer();
       commands.push(command(AAC_COMMANDS.IGNORED, { reason: "invalid_blink_prefix", code }));
@@ -620,7 +620,7 @@ export class AacInputMachine {
     }
   }
 
-  lockMenuForFirstShortBlink(commands) {
+  lockMenuForSecondShortBlink(commands) {
     if (this.mode !== AAC_INPUT_MODES.SECONDARY_MENU && this.mode !== AAC_INPUT_MODES.INPUT_MANAGEMENT) {
       return;
     }

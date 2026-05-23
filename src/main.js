@@ -4479,7 +4479,7 @@ function enqueueBlinkSymbol(symbol, meta = {}) {
     state.blinkCodeDurations.push(meta.durationMs);
   }
   state.blinkCodeBuffer.push(symbol);
-  if (symbol === "." && state.blinkCodeBuffer.length === 1 && !emergencyOnlyBuffer) {
+  if (state.blinkCodeBuffer.join("") === ".." && !emergencyOnlyBuffer) {
     lockSecondarySelectionForBlink(now);
   }
   if (state.blinkCodeBuffer.length > 3) {

@@ -115,7 +115,7 @@ test("stale blink gaps silently reset the sequence", () => {
   assert.ok(!hasCommand(commands, AAC_COMMANDS.ENTER_INPUT_MANAGEMENT));
 });
 
-test("secondary menu selection locks the first highlighted item", () => {
+test("secondary menu selection locks the item highlighted on the second short blink", () => {
   const machine = createMachine();
   run(machine, [S, 150, L, 400]);
 
@@ -128,11 +128,28 @@ test("secondary menu selection locks the first highlighted item", () => {
     hasCommand(
       commands,
       AAC_COMMANDS.SELECT_MENU_ITEM,
-      (item) => item.groupId === "scratch" && item.index === 0 && item.itemId === "scratch_head",
+      (item) => item.groupId === "scratch" && item.index === 1 && item.itemId === "scratch_face",
     ),
   );
-  assert.ok(!hasCommand(commands, AAC_COMMANDS.SELECT_MENU_ITEM, (item) => item.index === 1));
+  assert.ok(!hasCommand(commands, AAC_COMMANDS.SELECT_MENU_ITEM, (item) => item.index === 0));
   assert.equal(machine.snapshot().mode, AAC_INPUT_MODES.COOLDOWN);
+});
+
+test("single short blink in a secondary menu does not lock or pause selection", () => {
+  const machine = createMachine({
+    initialState: {
+      mode: AAC_INPUT_MODES.SECONDARY_MENU,
+      menu: {
+        groupId: "scratch",
+        index: 1,
+      },
+    },
+  });
+
+  const commands = run(machine, [S]);
+
+  assert.ok(!hasCommand(commands, AAC_COMMANDS.LOCK_MENU_ITEM));
+  assert.equal(machine.snapshot().menu.lockedIndex, null);
 });
 
 test("menu index is clamped before selection", () => {
