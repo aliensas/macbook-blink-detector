@@ -615,6 +615,7 @@ const RUNTIME_TEXT_EN = {
   "人脸检测不稳定": "Face tracking is unstable",
   "眼部关键点不稳定": "Eye landmarks are unstable",
   "仅保留眼部输入": "Eye-only input",
+  "质量不足": "Quality low",
   "质量不足，已暂停触发": "Quality too low; trigger paused",
   "人脸质量不足，请调整手机位置。": "Face quality is too low. Please adjust the phone position.",
   "请将手机靠近患者，或使用 2x 镜头。": "Move the phone closer to the patient, or use the 2x lens.",
@@ -2929,7 +2930,7 @@ function faceQualityTriggerPolicy(quality = state.faceQuality) {
   return quality?.triggerPolicy || (quality?.blocking ? "none" : "all");
 }
 
-const EYE_BASED_CANDIDATES = new Set([
+const EYE_INPUT_CANDIDATES = new Set([
   "ordinaryBlinkCode",
   "emergencyBlink",
   "inputManagement",
@@ -2941,16 +2942,26 @@ const EYE_BASED_CANDIDATES = new Set([
 ]);
 
 function canTriggerCandidate(candidate, { quality = state.faceQuality } = {}) {
-  if (EYE_BASED_CANDIDATES.has(candidate)) {
-    return true;
-  }
-
   const policy = faceQualityTriggerPolicy(quality);
   if (policy === "all") {
     return true;
   }
+  if (policy === "eyesOnly") {
+    return EYE_INPUT_CANDIDATES.has(candidate);
+  }
 
   return false;
+}
+
+function currentAacQualityState(quality = state.faceQuality) {
+  const policy = faceQualityTriggerPolicy(quality);
+  if (policy === "all") {
+    return quality?.level === "usable" ? AAC_QUALITY_STATES.USABLE_WARN : AAC_QUALITY_STATES.GOOD;
+  }
+  if (policy === "eyesOnly") {
+    return AAC_QUALITY_STATES.UNSTABLE_EYES_OK;
+  }
+  return quality?.reason === "missing" ? AAC_QUALITY_STATES.NO_FACE : AAC_QUALITY_STATES.UNSTABLE_EYES_BAD;
 }
 
 function faceQualityBlockReason(quality = state.faceQuality) {
@@ -3032,6 +3043,17 @@ function suppressGestureEventForFaceQuality(event, label = "动作") {
   }
 
   return false;
+}
+
+function resetPatientInputForBlockedFaceQuality() {
+  clearBlinkCodeBuffer();
+  resetDetectionWindow();
+  resetGestureSequences();
+  gestureDetectors.brow.reset();
+  gestureDetectors.secondaryBrow.reset();
+  gestureDetectors.mouth.reset();
+  gestureDetectors.smile.reset();
+  headShakeDetector.reset();
 }
 
 function clearActionCooldown() {
@@ -3336,7 +3358,7 @@ function hasConfirmedCalibration() {
 }
 
 function requiresConfirmedCalibrationForActionMapping() {
-  return PLATFORM_MODE === "ios";
+  return true;
 }
 
 function canUseActionMapping() {
@@ -4225,7 +4247,7 @@ function createAacBlinkDecodeMachine({ decodedAt, emergencyOnly }) {
 
   return createAacInputMachine({
     nowMs: decodedAt,
-    qualityState: AAC_QUALITY_STATES.GOOD,
+    qualityState: currentAacQualityState(),
     inputChannels: {
       brow: browToggle.checked,
       mouth: mouthToggle.checked,
@@ -5665,13 +5687,7 @@ function processFaceSignals(signals, now) {
     earValue.textContent = "--";
     confidenceLabel.textContent = "--";
     earBar.style.width = "0%";
-    resetDetectionWindow();
-    resetGestureSequences();
-    gestureDetectors.brow.reset();
-    gestureDetectors.secondaryBrow.reset();
-    gestureDetectors.mouth.reset();
-    gestureDetectors.smile.reset();
-    headShakeDetector.reset();
+    resetPatientInputForBlockedFaceQuality();
     return;
   }
 
@@ -5684,13 +5700,7 @@ function processFaceSignals(signals, now) {
     earValue.textContent = "--";
     confidenceLabel.textContent = "--";
     earBar.style.width = "0%";
-    resetDetectionWindow();
-    resetGestureSequences();
-    gestureDetectors.brow.reset();
-    gestureDetectors.secondaryBrow.reset();
-    gestureDetectors.mouth.reset();
-    gestureDetectors.smile.reset();
-    headShakeDetector.reset();
+    resetPatientInputForBlockedFaceQuality();
     return;
   }
 
@@ -5701,6 +5711,13 @@ function processFaceSignals(signals, now) {
   earBar.style.width = `${Math.round(openness * 100)}%`;
   confidenceLabel.textContent = localizeRuntimeText(isClosed ? "闭合" : "睁开");
   collectCalibrationFrame(signals, now);
+
+  if (faceQualityTriggerPolicy() === "none") {
+    blinkState.textContent = localizeRuntimeText("质量不足");
+    lastGesture.textContent = localizeRuntimeText("质量不足，已暂停触发");
+    resetPatientInputForBlockedFaceQuality();
+    return;
+  }
 
   if (isClosed) {
     updateObservedEyeClosure(now);
@@ -5757,8 +5774,8 @@ function processFaceSignals(signals, now) {
     return;
   }
 
-  if (isFaceQualityGateEnabled() && faceQualityTriggerPolicy() === "none") {
-    lastGesture.textContent = localizeRuntimeText("质量不足，已暂停触发");
+  if (faceQualityTriggerPolicy() === "eyesOnly") {
+    lastGesture.textContent = localizeRuntimeText("仅保留眼部输入");
     resetGestureSequences();
     gestureDetectors.brow.reset();
     gestureDetectors.secondaryBrow.reset();

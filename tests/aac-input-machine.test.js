@@ -394,12 +394,11 @@ test("smile waits for double-smile before falling back to single-smile", () => {
   assert.deepEqual(actionIds(double), ["smile_double"]);
 });
 
-test("quality gate blocks ordinary actions in unstable-eye mode but allows strict SOS", () => {
+test("quality gate keeps eye input in unstable-eye mode but blocks optional gestures", () => {
   const ordinaryMachine = createMachine({ qualityState: AAC_QUALITY_STATES.UNSTABLE_EYES_OK });
   const ordinary = run(ordinaryMachine, [S, 150, S, 1300]);
 
-  assert.deepEqual(actionIds(ordinary), []);
-  assert.ok(hasCommand(ordinary, AAC_COMMANDS.BLOCKED, (item) => item.candidate === "ordinaryBlinkCode"));
+  assert.deepEqual(actionIds(ordinary), ["blink_double_short"]);
 
   const emergencyMachine = createMachine({ qualityState: AAC_QUALITY_STATES.UNSTABLE_EYES_OK });
   const emergency = run(emergencyMachine, [S, 150, S, 150, S, 400]);

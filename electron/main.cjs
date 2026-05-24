@@ -76,15 +76,27 @@ async function registerAppProtocol() {
 }
 
 function configurePermissions() {
-  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => permission === "media");
+  function allowsVideoOnlyMediaRequest(details = {}) {
+    const mediaTypes = details.mediaTypes || [];
+    return mediaTypes.includes("video") && !mediaTypes.includes("audio");
+  }
+
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission, _requestingOrigin, details = {}) => {
+    if (permission !== "media") {
+      return false;
+    }
+
+    const mediaTypes = details.mediaTypes || [];
+    return mediaTypes.length === 0 || allowsVideoOnlyMediaRequest(details);
+  });
+
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback, details = {}) => {
     if (permission !== "media") {
       callback(false);
       return;
     }
 
-    const mediaTypes = details.mediaTypes || [];
-    callback(mediaTypes.length === 0 || mediaTypes.includes("video"));
+    callback(allowsVideoOnlyMediaRequest(details));
   });
 }
 

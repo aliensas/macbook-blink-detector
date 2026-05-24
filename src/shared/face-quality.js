@@ -96,16 +96,23 @@ function computeEyeSpanRatio(landmarks) {
   return distance(leftOuter, rightOuter);
 }
 
-function computeEyesUsable(landmarks, bounds, jitter) {
-  const eyeSpanRatio = computeEyeSpanRatio(landmarks);
-  const eyesUsable =
-    eyeSpanRatio >= 0.075 &&
-    bounds.heightRatio >= 0.16 &&
-    bounds.areaRatio >= 0.02 &&
-    bounds.edgeMargin >= -0.04 &&
-    jitter <= 0.11;
+function computeEyeAnchorEdgeMargin(landmarks) {
+  if (!hasLandmarkIndices(landmarks, EYE_ANCHOR_POINTS)) {
+    return -1;
+  }
 
-  return { eyesUsable, eyeSpanRatio };
+  return EYE_ANCHOR_POINTS.reduce((margin, index) => {
+    const point = landmarks[index];
+    return Math.min(margin, point.x, point.y, 1 - point.x, 1 - point.y);
+  }, 1);
+}
+
+function computeEyesUsable(landmarks) {
+  const eyeSpanRatio = computeEyeSpanRatio(landmarks);
+  const eyeEdgeMargin = computeEyeAnchorEdgeMargin(landmarks);
+  const eyesUsable = eyeSpanRatio >= 0.055 && eyeEdgeMargin >= -0.08;
+
+  return { eyesUsable, eyeSpanRatio, eyeEdgeMargin };
 }
 
 function scoreFaceQuality(bounds, jitter) {
@@ -205,7 +212,7 @@ export function createFaceQualityTracker({ jitterWindow = 8 } = {}) {
 
       const jitter =
         jitterSamples.length > 1 ? jitterSamples.reduce((sum, value) => sum + value, 0) / jitterSamples.length : 0;
-      const eyeQuality = computeEyesUsable(landmarks, bounds, jitter);
+      const eyeQuality = computeEyesUsable(landmarks);
       const classification = classifyQuality(bounds, jitter, eyeQuality.eyesUsable);
 
       return {

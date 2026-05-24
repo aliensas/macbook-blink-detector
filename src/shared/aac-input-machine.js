@@ -107,7 +107,7 @@ function clone(value) {
 
 function qualityPolicy(qualityState) {
   if (qualityState === AAC_QUALITY_STATES.UNSTABLE_EYES_OK) {
-    return "emergencyOnly";
+    return "eyesOnly";
   }
   if (qualityState === AAC_QUALITY_STATES.UNSTABLE_EYES_BAD || qualityState === AAC_QUALITY_STATES.NO_FACE) {
     return "none";
@@ -403,6 +403,18 @@ export class AacInputMachine {
     }
     if (policy === "none") {
       return false;
+    }
+    if (policy === "eyesOnly") {
+      return [
+        "ordinaryBlinkCode",
+        "emergencyBlink",
+        "inputManagement",
+        "secondarySelect",
+        "confirmation",
+        "longCloseExit",
+        "longCloseQuiet",
+        "quietRecovery",
+      ].includes(candidate);
     }
     return [
       "emergencyBlink",
