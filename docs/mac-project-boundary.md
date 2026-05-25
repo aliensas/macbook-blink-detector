@@ -12,6 +12,8 @@ Primary runtime: Vite web app + Electron macOS shell
 
 Its main goal is to keep the Mac version of the ALS facial micro-movement AAC prototype stable and testable.
 
+Safety boundary: this repository is for an assistive communication prototype only. It is not medical software, emergency-response software, an alarm system, or a life-support device. Phrases such as "emergency help" or "suction" are communication outputs only and must not replace nurse-call systems, caregiver checks, emergency services, ventilator/monitor alarms, or professional medical equipment.
+
 ## Scope
 
 This repository owns:

@@ -139,6 +139,15 @@ h1 {
   font-weight: 800;
 }
 
+.safety-notice {
+  max-width: 760px;
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -1669,6 +1678,11 @@ input[type="range"] {
     line-height: 1.1;
   }
 
+  .safety-notice {
+    margin-top: 6px;
+    font-size: 0.68rem;
+  }
+
   .status-pill {
     width: 100%;
     min-height: 36px;
@@ -1876,6 +1890,10 @@ input[type="range"] {
     overflow-wrap: anywhere;
   }
 
+  .safety-notice {
+    display: none;
+  }
+
   .status-pill {
     width: auto;
     min-width: 82px;
@@ -2073,6 +2091,10 @@ input[type="range"] {
     font-size: clamp(1rem, 2.2vw, 1.2rem);
     line-height: 1.08;
     overflow-wrap: anywhere;
+  }
+
+  .safety-notice {
+    display: none;
   }
 
   .status-pill {
