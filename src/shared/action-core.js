@@ -219,12 +219,12 @@ export const SECONDARY_SELECTION_GROUP_DEFINITIONS = {
     promptSuffix: "请继续选择位置",
     hint: "自动轮流高亮；两次短眨或轻抬眉后放松选择，闭眼 3 秒以上或摇头退出。",
     options: [
-      { id: "scratch_head", label: "头部", text: "请帮我挠头部" },
-      { id: "scratch_face", label: "脸部/耳边", text: "请帮我挠脸部或耳边" },
-      { id: "scratch_back", label: "背部", text: "请帮我挠背部" },
-      { id: "scratch_arm", label: "手臂", text: "请帮我挠手臂" },
-      { id: "scratch_leg", label: "腿部", text: "请帮我挠腿部" },
-      { id: "scratch_check", label: "请查看", text: "请帮我查看哪里痒" },
+      { id: "scratch_head", label: "头部", text: "请帮我挠头部", question: "挠头部吗？" },
+      { id: "scratch_face", label: "脸部/耳边", text: "请帮我挠脸部或耳边", question: "挠脸部或耳边吗？" },
+      { id: "scratch_back", label: "背部", text: "请帮我挠背部", question: "挠背部吗？" },
+      { id: "scratch_arm", label: "手臂", text: "请帮我挠手臂", question: "挠手臂吗？" },
+      { id: "scratch_leg", label: "腿部", text: "请帮我挠腿部", question: "挠腿部吗？" },
+      { id: "scratch_check", label: "请查看", text: "请帮我查看哪里痒", question: "请查看哪里痒吗？" },
     ],
   },
   position: {
@@ -235,12 +235,12 @@ export const SECONDARY_SELECTION_GROUP_DEFINITIONS = {
     promptSuffix: "请继续选择调整方式",
     hint: "自动轮流高亮；两次短眨或轻抬眉后放松选择，闭眼 3 秒以上或摇头退出。",
     options: [
-      { id: "position_left", label: "向左侧翻身", text: "请帮我向左侧翻身" },
-      { id: "position_right", label: "向右侧翻身", text: "请帮我向右侧翻身" },
-      { id: "position_raise", label: "抬高上身", text: "请帮我把头和上半身垫高一点" },
-      { id: "position_lower", label: "放低上身", text: "请帮我把头和上半身放低一点" },
-      { id: "position_pillow", label: "调整枕头", text: "请帮我调整枕头" },
-      { id: "position_legs", label: "调整腿脚", text: "请帮我调整腿部或脚的位置" },
+      { id: "position_left", label: "向左侧翻身", text: "请帮我向左侧翻身", question: "向左侧翻身吗？" },
+      { id: "position_right", label: "向右侧翻身", text: "请帮我向右侧翻身", question: "向右侧翻身吗？" },
+      { id: "position_raise", label: "抬高上身", text: "请帮我把头和上半身垫高一点", question: "抬高上身吗？" },
+      { id: "position_lower", label: "放低上身", text: "请帮我把头和上半身放低一点", question: "放低上身吗？" },
+      { id: "position_pillow", label: "调整枕头", text: "请帮我调整枕头", question: "调整枕头吗？" },
+      { id: "position_legs", label: "调整腿脚", text: "请帮我调整腿部或脚的位置", question: "调整腿脚吗？" },
     ],
   },
   inputChannels: {
@@ -267,12 +267,12 @@ export const SECONDARY_SELECTION_LOCALIZATION = {
       promptSuffix: "please choose the area",
       hint: "The highlight moves automatically. Use two short blinks or a light eyebrow raise to select; close eyes for 3 seconds or shake head to exit.",
       options: {
-        scratch_head: { label: "Head", text: "Please scratch my head." },
-        scratch_face: { label: "Face / ear", text: "Please scratch my face or near my ear." },
-        scratch_back: { label: "Back", text: "Please scratch my back." },
-        scratch_arm: { label: "Arm", text: "Please scratch my arm." },
-        scratch_leg: { label: "Leg", text: "Please scratch my leg." },
-        scratch_check: { label: "Please check", text: "Please check where I feel itchy." },
+        scratch_head: { label: "Head", text: "Please scratch my head.", question: "Scratch my head?" },
+        scratch_face: { label: "Face / ear", text: "Please scratch my face or near my ear.", question: "Scratch my face or near my ear?" },
+        scratch_back: { label: "Back", text: "Please scratch my back.", question: "Scratch my back?" },
+        scratch_arm: { label: "Arm", text: "Please scratch my arm.", question: "Scratch my arm?" },
+        scratch_leg: { label: "Leg", text: "Please scratch my leg.", question: "Scratch my leg?" },
+        scratch_check: { label: "Please check", text: "Please check where I feel itchy.", question: "Check where I feel itchy?" },
       },
     },
     position: {
@@ -281,12 +281,12 @@ export const SECONDARY_SELECTION_LOCALIZATION = {
       promptSuffix: "please choose the adjustment",
       hint: "The highlight moves automatically. Use two short blinks or a light eyebrow raise to select; close eyes for 3 seconds or shake head to exit.",
       options: {
-        position_left: { label: "Turn left", text: "Please help me turn to my left side." },
-        position_right: { label: "Turn right", text: "Please help me turn to my right side." },
-        position_raise: { label: "Raise upper body", text: "Please raise my head and upper body a little." },
-        position_lower: { label: "Lower upper body", text: "Please lower my head and upper body a little." },
-        position_pillow: { label: "Adjust pillow", text: "Please adjust my pillow." },
-        position_legs: { label: "Adjust legs", text: "Please adjust my legs or feet." },
+        position_left: { label: "Turn left", text: "Please help me turn to my left side.", question: "Turn to my left side?" },
+        position_right: { label: "Turn right", text: "Please help me turn to my right side.", question: "Turn to my right side?" },
+        position_raise: { label: "Raise upper body", text: "Please raise my head and upper body a little.", question: "Raise my upper body?" },
+        position_lower: { label: "Lower upper body", text: "Please lower my head and upper body a little.", question: "Lower my upper body?" },
+        position_pillow: { label: "Adjust pillow", text: "Please adjust my pillow.", question: "Adjust my pillow?" },
+        position_legs: { label: "Adjust legs", text: "Please adjust my legs or feet.", question: "Adjust my legs or feet?" },
       },
     },
     inputChannels: {
@@ -365,7 +365,7 @@ export function applySecondarySelectionGroupLanguage(groups, lang = "zh") {
     group.options.forEach((option, index) => {
       const baseOption = baseGroup.options[index];
       const localizedOption = localized.options?.[baseOption.id] || {};
-      ["label", "text", "onText", "offText"].forEach((field) => {
+      ["label", "text", "question", "onText", "offText"].forEach((field) => {
         if (baseOption[field] || localizedOption[field]) {
           option[field] = localizedOption[field] || baseOption[field];
         }

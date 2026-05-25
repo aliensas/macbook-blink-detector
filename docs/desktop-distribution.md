@@ -21,7 +21,7 @@ npm run dist:mac
 4. 启动摄像头，完成一次患者校准和确认。
 5. 同一患者以后再次打开会自动沿用本机校准档案。
 
-如果 macOS 提示应用来自未识别开发者，右键应用并选择“打开”，或到“系统设置 > 隐私与安全性”允许打开。正式给更多家庭使用前，建议做 Apple Developer ID 签名和 notarization。
+如果 macOS 提示应用来自未识别开发者，右键应用并选择“打开”，或到“系统设置 > 隐私与安全性”允许打开。正式给更多家庭使用前，需要做 Apple Developer ID 签名和 Apple notarization。具体流程见 `docs/mac-signing-notarization.md`。
 
 ## 当前封装内容
 

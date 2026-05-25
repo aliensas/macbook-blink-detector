@@ -15,7 +15,9 @@
     "desktop": "npm run build && electron .",
     "package": "npm run build && electron-builder --dir --publish=never",
     "dist": "npm run dist:mac",
-    "dist:mac": "npm run build && electron-builder --mac dmg zip --publish=never"
+    "dist:mac": "npm run build && electron-builder --mac dmg zip --publish=never",
+    "mac:signing:check": "node scripts/check-mac-signing-ready.cjs",
+    "dist:mac:signed": "node scripts/build-mac-signed.cjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.35",
@@ -38,6 +40,7 @@
       "package.json"
     ],
     "asar": true,
+    "afterPack": "scripts/after-pack.cjs",
     "mac": {
       "category": "public.app-category.medical",
       "target": [
@@ -46,8 +49,7 @@
       ],
       "identity": null,
       "extendInfo": {
-        "NSCameraUsageDescription": "ALS 面部微动作 AAC 需要使用摄像头识别面部动作和眨眼短码。",
-        "NSMicrophoneUsageDescription": "此应用不录音；仅在系统要求时声明麦克风权限。"
+        "NSCameraUsageDescription": "ALS 面部微动作 AAC 需要使用摄像头识别面部动作和眨眼短码。"
       }
     }
   }

@@ -2273,6 +2273,43 @@ function renderSecondarySelection() {
   renderPatientSecondarySelectionBar(group);
 }
 
+function shouldSpeakSecondarySelectionScan(group) {
+  return group?.id === "scratch" || group?.id === "position";
+}
+
+function secondarySelectionQuestionText(group, option) {
+  if (!group || !option) {
+    return "";
+  }
+
+  if (option.question) {
+    return option.question;
+  }
+
+  const label = secondarySelectionOptionLabel(group, option);
+  return currentLanguage === "en" ? `${label}?` : `${label}吗？`;
+}
+
+function speakSecondarySelectionCurrentOption({ includeIntro = false } = {}) {
+  const group = activeSecondarySelectionGroup();
+  if (!shouldSpeakSecondarySelectionScan(group) || state.quietMode.active) {
+    return;
+  }
+
+  const option = group.options[secondarySelectionCurrentIndex()] || group.options[0];
+  const question = secondarySelectionQuestionText(group, option);
+  if (!question) {
+    return;
+  }
+
+  const text = includeIntro
+    ? currentLanguage === "en"
+      ? `${group.label} selection. ${question}`
+      : `${group.label}选择。${question}`
+    : question;
+  speak(text);
+}
+
 function clearSecondarySelectionTimer() {
   window.clearTimeout(state.secondarySelection.scanTimer);
   state.secondarySelection.scanTimer = 0;
@@ -2369,6 +2406,7 @@ function advanceSecondarySelection() {
 
   state.secondarySelection.index = (state.secondarySelection.index + 1) % group.options.length;
   renderSecondarySelection();
+  speakSecondarySelectionCurrentOption();
   scheduleSecondarySelectionScan();
 }
 
@@ -2400,7 +2438,11 @@ function startSecondarySelection(group, action, label = action?.label || group.l
   const actionText = getActionText(action);
   const prompt = currentLanguage === "en" ? `${actionText} ${group.promptSuffix}.` : `${actionText}，${group.promptSuffix}`;
   setCommunicationMessage(prompt, label);
-  speak(prompt);
+  if (shouldSpeakSecondarySelectionScan(group)) {
+    speakSecondarySelectionCurrentOption({ includeIntro: true });
+  } else {
+    speak(prompt);
+  }
   addLog(`${label}：进入二级选择`);
   finishPendingTestRecord({ text: prompt, label, note: "secondary_selection_started" });
   return true;
