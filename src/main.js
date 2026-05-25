@@ -95,6 +95,8 @@ const codeBuffer = document.querySelector("#codeBuffer");
 const repeatSpeechButton = document.querySelector("#repeatSpeechButton");
 const clearSpeechButton = document.querySelector("#clearSpeechButton");
 const pauseRecognitionButton = document.querySelector("#pauseRecognitionButton");
+const speechStatus = document.querySelector("#speechStatus");
+const speechStatusText = document.querySelector("#speechStatusText");
 const secondarySelectionPanel = document.querySelector("#secondarySelectionPanel");
 const secondarySelectionTitle = document.querySelector("#secondarySelectionTitle");
 const secondarySelectionHint = document.querySelector("#secondarySelectionHint");
@@ -236,6 +238,12 @@ const UI_TEXT = {
     communicationOutput: "通信输出",
     waitingInput: "等待输入",
     repeatSpeech: "重播",
+    repeatSpeechTitle: "重播语音；没有上一句时测试语音",
+    speechIdle: "语音待测试",
+    speechSpeaking: "正在播报",
+    speechOk: "语音正常",
+    speechError: "语音不可用，请检查系统音量、输出设备或语音包。",
+    speechTestPhrase: "语音测试正常。",
     clearSpeech: "清空",
     pauseRecognition: "暂停",
     secondarySelection: "二级选择",
@@ -355,6 +363,12 @@ const UI_TEXT = {
     communicationOutput: "Communication output",
     waitingInput: "Waiting for input",
     repeatSpeech: "Repeat",
+    repeatSpeechTitle: "Repeat speech; test speech if no phrase is available",
+    speechIdle: "Speech untested",
+    speechSpeaking: "Speaking",
+    speechOk: "Speech ready",
+    speechError: "Speech unavailable. Check system volume, output device, or voice package.",
+    speechTestPhrase: "Speech test is working.",
     clearSpeech: "Clear",
     pauseRecognition: "Pause",
     secondarySelection: "Secondary selection",
@@ -491,7 +505,8 @@ const STATIC_TEXT_BINDINGS = [
   [".message-display .metric-label", "communicationOutput"],
   ["#messageText", "waitingInput"],
   ["#repeatSpeechButton span", "repeatSpeech"],
-  ["#repeatSpeechButton", "repeatSpeech", "title"],
+  ["#repeatSpeechButton", "repeatSpeechTitle", "title"],
+  ["#speechStatusText", "speechIdle"],
   ["#clearSpeechButton span", "clearSpeech"],
   ["#clearSpeechButton", "clearSpeech", "title"],
   ["#pauseRecognitionButton span", "pauseRecognition"],
@@ -921,6 +936,7 @@ const BLINK_SEQUENCE_TIMING = {
 };
 const BLINK_CODE_MAX_TOTAL_MS = DEFAULT_AAC_TIMING.codeMaxTotalMs;
 const CALIBRATION_BLINK_SAMPLE = {
+  longAutoRecordMs: 900,
   longMaxMs: 5000,
   timeoutMs: 10000,
 };
@@ -941,6 +957,7 @@ const MENU_ACTION_COOLDOWN_MS = DEFAULT_AAC_TIMING.menuActionCooldownMs;
 const EMERGENCY_BLINK_CODE = "...";
 const SECONDARY_SELECTION_BLINK_LOCK_MS =
   BLINK_SEQUENCE_TIMING.maxGapAfterShortMs + BLINK_SYMBOLS.shortMaxMs + BLINK_SYMBOLS.decodeDelayMs + 250;
+const SECONDARY_SELECTION_INTRO_FALLBACK_MS = 7000;
 
 const ACTION_CONFIG = createActionConfig(currentLanguage);
 const SECONDARY_SELECTION_GROUPS = createSecondarySelectionGroups(currentLanguage);
@@ -1009,7 +1026,7 @@ const CALIBRATION_STEPS = [
   {
     id: "long",
     title: "4. 长闭眼样本",
-    instruction: "点击“开始记录”后做 1 次约 1 秒的可控长闭眼，闭完要明显睁开；采集有效范围约 0.7-5 秒。",
+    instruction: "点击“开始记录”后闭眼并保持约 1 秒；系统达到时会自动记录，看到进度完成后再睁开。",
     kind: "blink",
     sampleKey: "longBlinkDurations",
     targetCount: 1,
@@ -1042,7 +1059,7 @@ const CALIBRATION_STEP_LOCALIZATION = {
     },
     long: {
       title: "4. Long eye-closure sample",
-      instruction: "After clicking Start recording, do 1 controlled long eye closure of about 1 second, then clearly reopen. The sample accepts about 0.7-5 seconds.",
+      instruction: "After clicking Start recording, close the eyes and hold for about 1 second. The sample records automatically when the progress completes.",
     },
     review: {
       title: "5. Confirm calibration",
@@ -1092,10 +1109,13 @@ const state = {
   menuActionCooldownUntil: 0,
   secondarySelection: {
     active: false,
+    phase: "idle",
+    sessionId: 0,
     groupId: "",
     index: 0,
     startedAt: 0,
     expiresAt: 0,
+    introTimer: 0,
     scanTimer: 0,
     lockedIndex: null,
     lockTimer: 0,
@@ -1122,6 +1142,7 @@ const state = {
     resumeLastAt: 0,
     resumeTimer: 0,
   },
+  speechRequestId: 0,
   lastPhrase: "等待输入",
   pendingConfirmation: null,
   sessionEvents: [],
@@ -1156,6 +1177,7 @@ const state = {
     stepIndex: 0,
     collecting: false,
     collectStartedAt: 0,
+    blinkFeedbackAt: 0,
     confirmed: false,
     completedStepIds: [],
     activeTestCode: "",
@@ -2186,6 +2208,24 @@ function activeSecondarySelectionGroup() {
   return selection ? SECONDARY_SELECTION_GROUPS[selection.groupId] || null : null;
 }
 
+function isSecondarySelectionIntro() {
+  return state.secondarySelection.active && state.secondarySelection.phase === "intro";
+}
+
+function isSecondarySelectionScanning() {
+  return state.secondarySelection.active && state.secondarySelection.phase === "scan";
+}
+
+function secondarySelectionIntroHint() {
+  return currentLanguage === "en"
+    ? "Voice guide is playing. Selection will start from the first item after it finishes."
+    : "正在播报引导。播报结束后会从第一项开始轮询。";
+}
+
+function secondarySelectionIntroCurrentText() {
+  return currentLanguage === "en" ? "Ready to start" : "准备开始选择";
+}
+
 function secondarySelectionOptionLabel(group, option) {
   if (group.id !== "inputChannels") {
     return option.label;
@@ -2208,7 +2248,8 @@ function secondarySelectionOptionLabel(group, option) {
 
 function renderSecondarySelectionOptionButton(group, option, index) {
   const optionButton = document.createElement("button");
-  optionButton.className = `secondary-selection-option${index === secondarySelectionCurrentIndex() ? " is-active" : ""}`;
+  const isActive = isSecondarySelectionScanning() && index === secondarySelectionCurrentIndex();
+  optionButton.className = `secondary-selection-option${isActive ? " is-active" : ""}`;
   optionButton.type = "button";
   optionButton.dataset.index = String(index);
   optionButton.textContent = secondarySelectionOptionLabel(group, option);
@@ -2217,7 +2258,8 @@ function renderSecondarySelectionOptionButton(group, option, index) {
 
 function renderPatientSecondaryOption(group, option, index) {
   const item = document.createElement("span");
-  item.className = `patient-secondary-option${index === secondarySelectionCurrentIndex() ? " is-active" : ""}`;
+  const isActive = isSecondarySelectionScanning() && index === secondarySelectionCurrentIndex();
+  item.className = `patient-secondary-option${isActive ? " is-active" : ""}`;
   item.textContent = secondarySelectionOptionLabel(group, option);
   return item;
 }
@@ -2230,12 +2272,19 @@ function renderSecondarySelectionPanel(group) {
   if (!group) {
     secondarySelectionPanel.hidden = true;
     secondarySelectionOptions.innerHTML = "";
+    if (secondarySelectionSelectButton) {
+      secondarySelectionSelectButton.disabled = false;
+    }
     return;
   }
 
+  const isIntro = isSecondarySelectionIntro();
   secondarySelectionPanel.hidden = false;
   secondarySelectionTitle.textContent = group.title;
-  secondarySelectionHint.textContent = group.hint;
+  secondarySelectionHint.textContent = isIntro ? secondarySelectionIntroHint() : group.hint;
+  if (secondarySelectionSelectButton) {
+    secondarySelectionSelectButton.disabled = isIntro;
+  }
   secondarySelectionOptions.innerHTML = "";
 
   group.options.forEach((option, index) => {
@@ -2257,12 +2306,15 @@ function renderPatientSecondarySelectionBar(group) {
     return;
   }
 
-  const activeOption = group.options[secondarySelectionCurrentIndex()] || group.options[0];
+  const isIntro = isSecondarySelectionIntro();
+  const activeOption = isIntro ? null : group.options[secondarySelectionCurrentIndex()] || group.options[0];
   patientSecondaryBar.hidden = false;
   patientSecondaryTitle.textContent = group.label;
-  patientSecondaryHint.textContent = t("patientSecondaryHint");
+  patientSecondaryHint.textContent = isIntro ? secondarySelectionIntroHint() : t("patientSecondaryHint");
   patientSecondaryPrefix.textContent = t("patientSecondaryCurrent");
-  patientSecondaryCurrent.textContent = activeOption ? secondarySelectionOptionLabel(group, activeOption) : "--";
+  patientSecondaryCurrent.textContent = isIntro
+    ? secondarySelectionIntroCurrentText()
+    : activeOption ? secondarySelectionOptionLabel(group, activeOption) : "--";
   patientSecondaryOptions.innerHTML = "";
 
   group.options.forEach((option, index) => {
@@ -2295,14 +2347,14 @@ function secondarySelectionQuestionText(group, option) {
 
 function speakSecondarySelectionCurrentOption({ includeIntro = false } = {}) {
   const group = activeSecondarySelectionGroup();
-  if (!shouldSpeakSecondarySelectionScan(group) || state.quietMode.active) {
-    return;
+  if (!isSecondarySelectionScanning() || !shouldSpeakSecondarySelectionScan(group) || state.quietMode.active) {
+    return Promise.resolve({ ok: false, skipped: true });
   }
 
   const option = group.options[secondarySelectionCurrentIndex()] || group.options[0];
   const question = secondarySelectionQuestionText(group, option);
   if (!question) {
-    return;
+    return Promise.resolve({ ok: false, skipped: true });
   }
 
   const text = includeIntro
@@ -2310,12 +2362,54 @@ function speakSecondarySelectionCurrentOption({ includeIntro = false } = {}) {
       ? `${group.label} selection. ${question}`
       : `${group.label}选择。${question}`
     : question;
-  speak(text);
+  return speak(text);
 }
 
 function clearSecondarySelectionTimer() {
   window.clearTimeout(state.secondarySelection.scanTimer);
   state.secondarySelection.scanTimer = 0;
+}
+
+function clearSecondarySelectionIntroTimer() {
+  window.clearTimeout(state.secondarySelection.introTimer);
+  state.secondarySelection.introTimer = 0;
+}
+
+function finishSecondarySelectionIntro(sessionId) {
+  if (
+    !state.secondarySelection.active ||
+    state.secondarySelection.phase !== "intro" ||
+    state.secondarySelection.sessionId !== sessionId
+  ) {
+    return;
+  }
+
+  clearSecondarySelectionIntroTimer();
+  const now = performance.now();
+  state.secondarySelection.phase = "scan";
+  state.secondarySelection.index = 0;
+  state.secondarySelection.startedAt = now;
+  state.secondarySelection.expiresAt = now + SECONDARY_SELECTION_TIMEOUT_MS;
+  renderSecondarySelection();
+  speakSecondarySelectionCurrentOption();
+  scheduleSecondarySelectionScan();
+}
+
+function startSecondarySelectionIntro(prompt) {
+  clearSecondarySelectionTimer();
+  clearSecondarySelectionIntroTimer();
+  state.secondarySelection.phase = "intro";
+  state.secondarySelection.sessionId += 1;
+  const sessionId = state.secondarySelection.sessionId;
+  renderSecondarySelection();
+
+  state.secondarySelection.introTimer = window.setTimeout(() => {
+    finishSecondarySelectionIntro(sessionId);
+  }, SECONDARY_SELECTION_INTRO_FALLBACK_MS);
+
+  Promise.resolve(speak(prompt)).finally(() => {
+    finishSecondarySelectionIntro(sessionId);
+  });
 }
 
 function clearSecondarySelectionLock({ resumeScan = false, render = false } = {}) {
@@ -2337,7 +2431,7 @@ function secondarySelectionCurrentIndex() {
 
 function applySecondarySelectionLockCommand(command, now = performance.now()) {
   const group = getActiveSecondarySelection(now);
-  if (!group || state.secondarySelection.lockedIndex !== null) {
+  if (!group || !isSecondarySelectionScanning() || state.secondarySelection.lockedIndex !== null) {
     return false;
   }
 
@@ -2386,7 +2480,11 @@ function shouldSuppressRecentlyConsumedBlinkCode(code, now = performance.now()) 
 
 function scheduleSecondarySelectionScan() {
   clearSecondarySelectionTimer();
-  if (!state.secondarySelection.active || state.secondarySelection.lockedIndex !== null) {
+  if (
+    !state.secondarySelection.active ||
+    !isSecondarySelectionScanning() ||
+    state.secondarySelection.lockedIndex !== null
+  ) {
     return;
   }
 
@@ -2403,7 +2501,7 @@ function scheduleSecondarySelectionScan() {
 
 function advanceSecondarySelection() {
   const group = activeSecondarySelectionGroup();
-  if (!group) {
+  if (!group || !isSecondarySelectionScanning()) {
     return;
   }
 
@@ -2415,8 +2513,11 @@ function advanceSecondarySelection() {
 
 function clearSecondarySelection({ render = true } = {}) {
   clearSecondarySelectionTimer();
+  clearSecondarySelectionIntroTimer();
   clearSecondarySelectionLock();
   state.secondarySelection.active = false;
+  state.secondarySelection.phase = "idle";
+  state.secondarySelection.sessionId += 1;
   state.secondarySelection.groupId = "";
   state.secondarySelection.index = 0;
   state.secondarySelection.startedAt = 0;
@@ -2431,19 +2532,21 @@ function startSecondarySelection(group, action, label = action?.label || group.l
   clearSecondarySelection({ render: false });
   const now = performance.now();
   state.secondarySelection.active = true;
+  state.secondarySelection.phase = "intro";
   state.secondarySelection.groupId = group.id;
   state.secondarySelection.index = 0;
   state.secondarySelection.startedAt = now;
   state.secondarySelection.expiresAt = now + SECONDARY_SELECTION_TIMEOUT_MS;
-  renderSecondarySelection();
-  scheduleSecondarySelectionScan();
 
   const actionText = getActionText(action);
   const prompt = currentLanguage === "en" ? `${actionText} ${group.promptSuffix}.` : `${actionText}，${group.promptSuffix}`;
   setCommunicationMessage(prompt, label);
   if (shouldSpeakSecondarySelectionScan(group)) {
-    speakSecondarySelectionCurrentOption({ includeIntro: true });
+    startSecondarySelectionIntro(prompt);
   } else {
+    state.secondarySelection.phase = "scan";
+    renderSecondarySelection();
+    scheduleSecondarySelectionScan();
     speak(prompt);
   }
   addLog(`${label}：进入二级选择`);
@@ -2463,6 +2566,7 @@ function startInputManagementSelection() {
   state.secondarySelection.index = 0;
   state.secondarySelection.startedAt = now;
   state.secondarySelection.expiresAt = now + SECONDARY_SELECTION_TIMEOUT_MS;
+  state.secondarySelection.phase = "scan";
   renderSecondarySelection();
   scheduleSecondarySelectionScan();
 
@@ -2527,6 +2631,12 @@ function selectSecondarySelection(index = secondarySelectionCurrentIndex(), sour
   const group = activeSecondarySelectionGroup();
   if (!group) {
     return false;
+  }
+
+  if (!isSecondarySelectionScanning()) {
+    addLog(`二级选择引导中，已忽略 ${sourceLabel}`);
+    finishPendingTestRecord({ note: "secondary_selection_intro_ignored_selection" });
+    return true;
   }
 
   const option = group.options[index] || group.options[state.secondarySelection.index];
@@ -2706,9 +2816,36 @@ function setCommunicationMessage(text, gestureLabel = "") {
   }
 }
 
-function cancelSpeech() {
+function setSpeechStatus(stateName, message) {
+  if (!speechStatus || !speechStatusText) {
+    return;
+  }
+
+  speechStatus.dataset.state = stateName;
+  speechStatusText.textContent = message || t(`speech${stateName[0].toUpperCase()}${stateName.slice(1)}`);
+}
+
+function visibleSpeechFailureMessage(error) {
+  const detail = error?.message || String(error || "");
+  if (!detail) {
+    return t("speechError");
+  }
+
+  return currentLanguage === "en" ? `${t("speechError")} ${detail}` : `${t("speechError")} ${detail}`;
+}
+
+function cancelSpeech({ markIdle = false, invalidate = true } = {}) {
+  if (invalidate) {
+    state.speechRequestId += 1;
+  }
+  if (window.alsAacSpeech?.cancel) {
+    window.alsAacSpeech.cancel().catch(() => {});
+  }
   if ("speechSynthesis" in window) {
     window.speechSynthesis.cancel();
+  }
+  if (markIdle) {
+    setSpeechStatus("idle");
   }
 }
 
@@ -2776,47 +2913,164 @@ function warmSpeechVoices() {
   };
 }
 
-function speak(text = state.lastPhrase) {
-  const speechText = localizeRuntimeText(text);
-  if (state.quietMode.active || !("speechSynthesis" in window) || !speechText || speechText === t("waitingInput")) {
+function markSpeechQueued(recordId) {
+  if (!recordId) {
     return;
   }
 
-  cancelSpeech();
-  const speechLang = t("speechLang");
-  const utterance = new SpeechSynthesisUtterance(speechText);
-  utterance.lang = speechLang;
-  if (currentLanguage === "en") {
-    const voice = preferredEnglishSpeechVoice(speechLang);
-    if (voice) {
-      utterance.voice = voice;
+  const queuedAt = performance.now();
+  const record = state.recording.records.find((item) => item.id === recordId);
+  updateTestRecord(recordId, {
+    speechQueuedAtMs: Math.round(queuedAt),
+    speechQueueLatencyFromDisplayMs:
+      record && Number.isFinite(record.displayAtMs) ? Math.round(queuedAt - record.displayAtMs) : null,
+  });
+}
+
+function markSpeechStarted(recordId) {
+  if (!recordId) {
+    return;
+  }
+
+  const startedAt = performance.now();
+  const latestRecord = state.recording.records.find((item) => item.id === recordId);
+  updateTestRecord(recordId, {
+    speechStartedAtMs: Math.round(startedAt),
+    speechStartLatencyFromQueueMs:
+      latestRecord && Number.isFinite(latestRecord.speechQueuedAtMs)
+        ? Math.round(startedAt - latestRecord.speechQueuedAtMs)
+        : null,
+  });
+}
+
+function speak(text = state.lastPhrase, { onComplete } = {}) {
+  return new Promise((resolve) => {
+    const speechText = localizeRuntimeText(text);
+    if (state.quietMode.active || !speechText || speechText === t("waitingInput")) {
+      resolve({ ok: false, skipped: true });
+      return;
     }
-  }
-  utterance.rate = currentLanguage === "en" ? 0.86 : 0.9;
-  utterance.pitch = 1;
-  utterance.volume = 1;
-  const recordId = state.recording.pendingRecordId;
-  if (recordId) {
-    const queuedAt = performance.now();
-    const record = state.recording.records.find((item) => item.id === recordId);
-    updateTestRecord(recordId, {
-      speechQueuedAtMs: Math.round(queuedAt),
-      speechQueueLatencyFromDisplayMs:
-        record && Number.isFinite(record.displayAtMs) ? Math.round(queuedAt - record.displayAtMs) : null,
-    });
-    utterance.onstart = () => {
-      const startedAt = performance.now();
-      const latestRecord = state.recording.records.find((item) => item.id === recordId);
-      updateTestRecord(recordId, {
-        speechStartedAtMs: Math.round(startedAt),
-        speechStartLatencyFromQueueMs:
-          latestRecord && Number.isFinite(latestRecord.speechQueuedAtMs)
-            ? Math.round(startedAt - latestRecord.speechQueuedAtMs)
-            : null,
-      });
+
+    const requestId = state.speechRequestId + 1;
+    state.speechRequestId = requestId;
+    const isCurrentSpeechRequest = () => state.speechRequestId === requestId;
+    let completed = false;
+    const completeSpeech = (result = { ok: true }) => {
+      if (completed) {
+        return;
+      }
+      completed = true;
+      if (isCurrentSpeechRequest() && typeof onComplete === "function") {
+        window.setTimeout(() => onComplete(result), 0);
+      }
+      resolve(isCurrentSpeechRequest() ? result : { ok: false, cancelled: true });
     };
-  }
-  window.speechSynthesis.speak(utterance);
+
+    cancelSpeech({ invalidate: false });
+    const speechLang = t("speechLang");
+    const speechRate = currentLanguage === "en" ? 0.86 : 0.9;
+    const recordId = state.recording.pendingRecordId;
+    markSpeechQueued(recordId);
+
+    const speakWithBrowser = () => {
+      if (!isCurrentSpeechRequest()) {
+        completeSpeech({ ok: false, cancelled: true });
+        return false;
+      }
+
+      if (!("speechSynthesis" in window)) {
+        setSpeechStatus("error");
+        completeSpeech({ ok: false, skipped: true });
+        return false;
+      }
+
+      const utterance = new SpeechSynthesisUtterance(speechText);
+      utterance.lang = speechLang;
+      if (currentLanguage === "en") {
+        const voice = preferredEnglishSpeechVoice(speechLang);
+        if (voice) {
+          utterance.voice = voice;
+        }
+      }
+      utterance.rate = speechRate;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      if (recordId) {
+        utterance.onstart = () => {
+          if (isCurrentSpeechRequest()) {
+            markSpeechStarted(recordId);
+            setSpeechStatus("speaking");
+          }
+        };
+      } else {
+        utterance.onstart = () => {
+          if (isCurrentSpeechRequest()) {
+            setSpeechStatus("speaking");
+          }
+        };
+      }
+      utterance.onend = () => {
+        if (isCurrentSpeechRequest()) {
+          setSpeechStatus("ok");
+        }
+        completeSpeech({ ok: true });
+      };
+      utterance.onerror = (event) => {
+        if (isCurrentSpeechRequest()) {
+          setSpeechStatus("error");
+        }
+        completeSpeech({ ok: false, error: event?.error || "browser_speech_error" });
+      };
+
+      try {
+        window.speechSynthesis.speak(utterance);
+      } catch (error) {
+        if (isCurrentSpeechRequest()) {
+          setSpeechStatus("error", visibleSpeechFailureMessage(error));
+        }
+        completeSpeech({ ok: false, error });
+        return false;
+      }
+      return true;
+    };
+
+    if (window.alsAacSpeech?.speak) {
+      markSpeechStarted(recordId);
+      setSpeechStatus("speaking");
+      window.alsAacSpeech
+        .speak({
+          text: speechText,
+          lang: speechLang,
+          rate: speechRate,
+          volume: 1,
+        })
+        .then(() => {
+          if (!isCurrentSpeechRequest()) {
+            completeSpeech({ ok: false, cancelled: true });
+            return;
+          }
+          setSpeechStatus("ok");
+          completeSpeech({ ok: true });
+        })
+        .catch((error) => {
+          if (!isCurrentSpeechRequest()) {
+            completeSpeech({ ok: false, cancelled: true, error });
+            return;
+          }
+          const failureMessage = visibleSpeechFailureMessage(error);
+          addLog(`语音播报失败：${error?.message || error || "系统语音不可用"}`);
+          if (!speakWithBrowser()) {
+            setSpeechStatus("error", failureMessage);
+            completeSpeech({ ok: false, error });
+          }
+        });
+      return;
+    }
+
+    if (!speakWithBrowser()) {
+      setSpeechStatus("error");
+    }
+  });
 }
 
 function announce(text, gestureLabel, { shouldSpeak = true } = {}) {
@@ -2834,6 +3088,7 @@ function triggerEmergencyFlash() {
   if (emergencyFlashTimer) {
     return; // already flashing
   }
+
   emergencyOverlay.classList.add("is-active");
   emergencyFlashTimer = window.setTimeout(() => {
     emergencyOverlay.classList.remove("is-active");
@@ -3551,6 +3806,7 @@ function loadSavedCalibrationProfile() {
   state.calibration.stepIndex = CALIBRATION_STEPS.findIndex((step) => step.id === "review");
   state.calibration.collecting = false;
   state.calibration.collectStartedAt = 0;
+  state.calibration.blinkFeedbackAt = 0;
   state.calibration.confirmed = true;
   state.calibration.completedStepIds = ["position", "open", "closed", "short", "long", "review"];
   state.calibration.activeTestCode = "";
@@ -3694,6 +3950,7 @@ function resetCalibration() {
   state.calibration.stepIndex = 0;
   state.calibration.collecting = false;
   state.calibration.collectStartedAt = 0;
+  state.calibration.blinkFeedbackAt = 0;
   state.calibration.confirmed = false;
   state.calibration.completedStepIds = [];
   state.calibration.activeTestCode = "";
@@ -3719,6 +3976,7 @@ function startCalibrationGuide() {
   state.calibration.stepIndex = CALIBRATION_STEPS.findIndex((step) => step.id === "open");
   state.calibration.collecting = false;
   state.calibration.collectStartedAt = 0;
+  state.calibration.blinkFeedbackAt = 0;
   state.calibration.confirmed = false;
   state.calibration.completedStepIds = [];
   state.calibration.activeTestCode = "";
@@ -3855,19 +4113,32 @@ function beginCalibrationCollection() {
   state.calibration.active = true;
   state.calibration.collecting = true;
   state.calibration.collectStartedAt = performance.now();
+  state.calibration.blinkFeedbackAt = 0;
   if (step.sampleKey) {
     state.calibration.samples[step.sampleKey] = [];
   }
+  if (step.kind === "blink") {
+    resetDetectionWindow();
+    clearBlinkCodeBuffer();
+  }
   calibrationProgress.style.width = "0%";
   calibrationProgress.classList.add("is-collecting");
-  guidedTestStatus.textContent =
-    step.kind === "blink"
-      ? currentLanguage === "en"
+  if (step.id === "long") {
+    guidedTestStatus.textContent =
+      currentLanguage === "en"
+        ? "Long eye-closure collection started. Close the eyes and hold for about 1 second; it will record automatically."
+        : "长闭眼采集已开始。请闭眼并保持约 1 秒，系统会自动记录。";
+  } else if (step.kind === "blink") {
+    guidedTestStatus.textContent =
+      currentLanguage === "en"
         ? `${step.title}: collecting. Follow the action prompt.`
-        : `${step.title}采集中，请按提示做动作。`
-      : currentLanguage === "en"
+        : `${step.title}采集中，请按提示做动作。`;
+  } else {
+    guidedTestStatus.textContent =
+      currentLanguage === "en"
         ? `${step.title}: collecting. Please hold the pose.`
         : `${step.title}采集中，请保持姿势。`;
+  }
   addLog(`开始采集：${step.title}`);
   updateCalibrationUI();
 }
@@ -3879,6 +4150,7 @@ function stopCalibrationCollection(message, { resetProgress = true } = {}) {
 
   state.calibration.collecting = false;
   state.calibration.collectStartedAt = 0;
+  state.calibration.blinkFeedbackAt = 0;
   calibrationProgress.classList.remove("is-collecting");
   if (resetProgress) {
     calibrationProgress.style.width = isCalibrationStepComplete(currentCalibrationStep().id) ? "100%" : "0%";
@@ -3915,6 +4187,7 @@ function applyCalibratedThreshold() {
 function finishCalibrationCollection() {
   const step = currentCalibrationStep();
   state.calibration.collecting = false;
+  state.calibration.blinkFeedbackAt = 0;
   calibrationProgress.classList.remove("is-collecting");
   markCalibrationStepComplete(step.id);
   if (step.id === "closed") {
@@ -3943,6 +4216,58 @@ function collectCalibrationFrame(signals, now) {
   }
 }
 
+function isCollectingLongBlinkCalibration() {
+  const step = currentCalibrationStep();
+  return state.calibration.collecting && step.kind === "blink" && step.id === "long";
+}
+
+function updateCalibrationBlinkBlockFeedback(now, zhMessage, enMessage) {
+  const step = currentCalibrationStep();
+  if (!state.calibration.collecting || step.kind !== "blink" || now - state.calibration.blinkFeedbackAt < 600) {
+    return;
+  }
+
+  guidedTestStatus.textContent = currentLanguage === "en" ? enMessage : zhMessage;
+  state.calibration.blinkFeedbackAt = now;
+}
+
+function maybeRecordHeldLongBlinkCalibration(now) {
+  if (!isCollectingLongBlinkCalibration() || !state.blinkWasClosed) {
+    return false;
+  }
+
+  const duration = state.blinkClosedObservedMs;
+  if (duration <= 0) {
+    return false;
+  }
+
+  const targetMs = CALIBRATION_BLINK_SAMPLE.longAutoRecordMs;
+  const progress = clamp(duration / targetMs, 0, 1);
+  calibrationProgress.style.width = `${Math.max(8, Math.round(progress * 100))}%`;
+
+  if (duration < targetMs) {
+    if (now - state.calibration.blinkFeedbackAt >= 300) {
+      const remainingSeconds = Math.max(0.1, (targetMs - duration) / 1000).toFixed(1);
+      guidedTestStatus.textContent =
+        currentLanguage === "en"
+          ? `Long eye closure detected. Hold for about ${remainingSeconds}s more.`
+          : `已检测到闭眼，继续保持约 ${remainingSeconds} 秒即可自动记录。`;
+      state.calibration.blinkFeedbackAt = now;
+    }
+    return false;
+  }
+
+  recordCalibrationBlink("-", duration);
+  state.blinkClosureConsumed = true;
+  state.calibration.blinkFeedbackAt = 0;
+  guidedTestStatus.textContent =
+    currentLanguage === "en"
+      ? "Long eye-closure sample recorded. You can reopen now and confirm calibration."
+      : "长闭眼样本已自动记录。现在可以睁开，并完成校准确认。";
+  addLog(`长闭眼样本自动记录：${Math.round(duration)}ms`);
+  return true;
+}
+
 function checkCalibrationBlinkCollectionTimeout(now) {
   const step = currentCalibrationStep();
   if (!state.calibration.collecting || step.kind !== "blink") {
@@ -3957,8 +4282,8 @@ function checkCalibrationBlinkCollectionTimeout(now) {
   stopCalibrationCollection(
     step.id === "long"
       ? currentLanguage === "en"
-        ? "Long eye-closure sample timed out. Reopen clearly, then try again with one closure of about 1 second."
-        : "长闭眼样本超时。请先明显睁开，再重新开始，做一次约 1 秒的长闭眼。"
+        ? "Long eye-closure sample timed out. Reopen clearly, start again, then hold the eyes closed for about 1 second until progress completes."
+        : "长闭眼样本超时。请先明显睁开，再重新开始；闭眼保持约 1 秒，看到进度完成即可。"
       : currentLanguage === "en"
         ? "Short-blink sample timed out. Try again with three clear short blinks, about 1 second apart."
         : "短眨样本超时。请重新开始，做 3 次清楚的短眨，每次间隔约 1 秒。",
@@ -4327,7 +4652,12 @@ function replayBlinkCodeThroughAacMachine(code, { decodedAt, emergencyOnly }) {
 
 function applyImmediateAacBlinkBufferCommands({ now = performance.now(), emergencyOnly = false } = {}) {
   const code = state.blinkCodeBuffer.join("");
-  if (code !== ".." || emergencyOnly || !getActiveSecondarySelection(now)) {
+  if (
+    code !== ".." ||
+    emergencyOnly ||
+    !getActiveSecondarySelection(now) ||
+    isSecondarySelectionIntro()
+  ) {
     return false;
   }
 
@@ -4422,6 +4752,11 @@ function applyAacBlinkMachineCommand(command, code, context) {
     case AAC_COMMANDS.ENTER_INPUT_MANAGEMENT:
       return openInputManagementFromBlinkCode({ note: "input_machine_input_management" });
     case AAC_COMMANDS.SELECT_MENU_ITEM:
+      if (isSecondarySelectionIntro()) {
+        addLog("二级选择引导播报中，已忽略普通选择短码");
+        rememberConsumedBlinkCode(code, "secondary_selection_intro_select_ignored");
+        return true;
+      }
       if (selectSecondarySelection(command.index, currentLanguage === "en" ? "two short blinks" : "两次短眨")) {
         rememberConsumedBlinkCode(code, "secondary_selection_select");
       }
@@ -5732,6 +6067,11 @@ function processFaceSignals(signals, now) {
     earValue.textContent = "--";
     confidenceLabel.textContent = "--";
     earBar.style.width = "0%";
+    updateCalibrationBlinkBlockFeedback(
+      now,
+      "未见人脸，暂不能采集眨眼样本。请让患者面部进入画面。",
+      "No face is visible, so blink samples cannot be collected. Place the patient’s face in view.",
+    );
     resetPatientInputForBlockedFaceQuality();
     return;
   }
@@ -5745,6 +6085,11 @@ function processFaceSignals(signals, now) {
     earValue.textContent = "--";
     confidenceLabel.textContent = "--";
     earBar.style.width = "0%";
+    updateCalibrationBlinkBlockFeedback(
+      now,
+      "眼部关键点不足，暂不能采集眨眼样本。请调整摄像头角度或光线。",
+      "Eye landmarks are insufficient, so blink samples cannot be collected. Adjust camera angle or lighting.",
+    );
     resetPatientInputForBlockedFaceQuality();
     return;
   }
@@ -5760,12 +6105,18 @@ function processFaceSignals(signals, now) {
   if (faceQualityTriggerPolicy() === "none") {
     blinkState.textContent = localizeRuntimeText("质量不足");
     lastGesture.textContent = localizeRuntimeText("质量不足，已暂停触发");
+    updateCalibrationBlinkBlockFeedback(
+      now,
+      "眼部关键点不稳定，暂不能采集眨眼样本。请调整摄像头距离、角度或光线。",
+      "Eye landmarks are unstable, so blink samples cannot be collected. Adjust camera distance, angle, or lighting.",
+    );
     resetPatientInputForBlockedFaceQuality();
     return;
   }
 
   if (isClosed) {
     updateObservedEyeClosure(now);
+    maybeRecordHeldLongBlinkCalibration(now);
     handleSustainedLongCloseWhileClosed(now);
     state.closedFrames += 1;
     state.openFrames = 0;
@@ -6129,7 +6480,8 @@ roiPreviewToggle?.addEventListener("change", () => {
 });
 
 repeatSpeechButton.addEventListener("click", () => {
-  speak();
+  const phrase = state.lastPhrase && state.lastPhrase !== t("waitingInput") ? state.lastPhrase : t("speechTestPhrase");
+  speak(phrase);
 });
 
 secondarySelectionOptions?.addEventListener("click", (event) => {
@@ -6154,7 +6506,7 @@ secondarySelectionCancelButton?.addEventListener("click", () => {
 });
 
 clearSpeechButton.addEventListener("click", () => {
-  cancelSpeech();
+  cancelSpeech({ markIdle: true });
   clearQuietMode();
   clearTransientCooldowns();
   clearBlinkCodeBuffer();

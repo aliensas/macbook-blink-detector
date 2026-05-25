@@ -10,12 +10,16 @@
     "dev": "vite --host 127.0.0.1",
     "dev:ios": "node scripts/start-ios-dev.mjs",
     "test:logic": "node --test tests/*.test.js",
+    "test:layout": "npm run build && electron scripts/check-desktop-layout.cjs",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "desktop": "npm run build && electron .",
     "package": "npm run build && electron-builder --dir --publish=never",
     "dist": "npm run dist:mac",
     "dist:mac": "npm run build && electron-builder --mac dmg zip --publish=never",
+    "dist:win": "npm run build && electron-builder --win nsis zip --x64 --publish=never",
+    "dist:win:zip": "npm run build && electron-builder --win zip --x64 --publish=never",
+    "dist:win:portable": "npm run build && electron-builder --win portable --x64 --publish=never",
     "mac:signing:check": "node scripts/check-mac-signing-ready.cjs",
     "dist:mac:signed": "node scripts/build-mac-signed.cjs"
   },
@@ -51,6 +55,22 @@
       "extendInfo": {
         "NSCameraUsageDescription": "ALS 面部微动作 AAC 需要使用摄像头识别面部动作和眨眼短码。"
       }
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "${productName} Portable ${version}.${ext}"
     }
   }
 }
