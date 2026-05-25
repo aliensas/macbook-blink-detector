@@ -961,6 +961,7 @@ const EMERGENCY_BLINK_CODE = "...";
 const SECONDARY_SELECTION_BLINK_LOCK_MS =
   BLINK_SEQUENCE_TIMING.maxGapAfterShortMs + BLINK_SYMBOLS.shortMaxMs + BLINK_SYMBOLS.decodeDelayMs + 250;
 const SECONDARY_SELECTION_INTRO_FALLBACK_MS = 7000;
+const SECONDARY_SELECTION_OPTION_SPEECH_FALLBACK_MS = 5000;
 const SECONDARY_SELECTION_POST_SPEECH_DWELL_MS = 2000;
 const BROW_BLINK_PRIORITY_GUARD_MS = 650;
 
@@ -2504,6 +2505,21 @@ function scheduleSecondarySelectionScan(delayMs = SECONDARY_SELECTION_SCAN_MS) {
   }, Math.max(0, delayMs));
 }
 
+function waitForSecondarySelectionCurrentOptionSpeech() {
+  let timeoutId = 0;
+  const speechPromise = Promise.resolve(speakSecondarySelectionCurrentOption());
+  const fallbackPromise = new Promise((resolve) => {
+    timeoutId = window.setTimeout(
+      () => resolve({ ok: true, timedOut: true }),
+      SECONDARY_SELECTION_OPTION_SPEECH_FALLBACK_MS,
+    );
+  });
+
+  return Promise.race([speechPromise, fallbackPromise]).finally(() => {
+    window.clearTimeout(timeoutId);
+  });
+}
+
 function scheduleSecondarySelectionScanAfterCurrentOption() {
   clearSecondarySelectionTimer();
   if (
@@ -2515,7 +2531,7 @@ function scheduleSecondarySelectionScanAfterCurrentOption() {
   }
 
   const sessionId = state.secondarySelection.sessionId;
-  Promise.resolve(speakSecondarySelectionCurrentOption())
+  waitForSecondarySelectionCurrentOptionSpeech()
     .then((result = {}) => {
       if (
         !state.secondarySelection.active ||
@@ -2526,6 +2542,9 @@ function scheduleSecondarySelectionScanAfterCurrentOption() {
         return;
       }
 
+      if (result.timedOut) {
+        addLog("二级选择：选项语音等待超时，继续轮询");
+      }
       const delayMs = result.ok ? SECONDARY_SELECTION_POST_SPEECH_DWELL_MS : SECONDARY_SELECTION_SCAN_MS;
       scheduleSecondarySelectionScan(delayMs);
     })
