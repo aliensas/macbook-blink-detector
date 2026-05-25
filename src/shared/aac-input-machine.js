@@ -67,7 +67,8 @@ export const DEFAULT_AAC_TIMING = {
   menuActionCooldownMs: 700,
   recoveryCooldownMs: 900,
   quietResumeBlinkCount: 4,
-  quietResumeWindowMs: 8000,
+  quietResumeMaxGapMs: 3000,
+  quietResumeWindowMs: 12000,
   mouthDoubleWindowMs: 2200,
   smileDoubleWindowMs: 1400,
   smileDoubleMinGapMs: 550,
@@ -942,11 +943,12 @@ export class AacInputMachine {
       return commands;
     }
 
+    const resumeMaxGapMs = this.timing.quietResumeMaxGapMs || this.timing.maxGapAfterShortMs;
     const gap = this.quiet.lastAt ? this.now - this.quiet.lastAt : 0;
     if (
       !this.quiet.startedAt ||
       this.now - this.quiet.startedAt > this.timing.quietResumeWindowMs ||
-      gap > this.timing.maxGapAfterShortMs
+      gap > resumeMaxGapMs
     ) {
       this.quiet = { count: 0, startedAt: this.now, lastAt: 0, deadlineAt: 0 };
     }
@@ -959,7 +961,7 @@ export class AacInputMachine {
       return commands;
     }
 
-    this.quiet.deadlineAt = this.now + this.timing.maxGapAfterShortMs;
+    this.quiet.deadlineAt = this.now + resumeMaxGapMs;
     commands.push(command(AAC_COMMANDS.IGNORED, { reason: "quiet_short_pending", count: this.quiet.count }));
     return commands;
   }

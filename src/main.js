@@ -944,8 +944,11 @@ const LONG_CLOSE_CONTROL = {
   exitMinMs: 3000,
   quietMinMs: 8000,
   maxObservedFrameGapMs: 500,
-  resumeBlinkCount: 4,
-  resumeWindowMs: 8000,
+  resumeBlinkCount: DEFAULT_AAC_TIMING.quietResumeBlinkCount,
+  resumeMaxGapMs: DEFAULT_AAC_TIMING.quietResumeMaxGapMs,
+  resumeWindowMs: DEFAULT_AAC_TIMING.quietResumeWindowMs,
+  resumeBlinkMinMs: BLINK_SYMBOLS.shortMinMs,
+  resumeBlinkMaxMs: 1000,
 };
 const ACTION_COOLDOWN_MS = {
   default: 1500,
@@ -958,6 +961,8 @@ const EMERGENCY_BLINK_CODE = "...";
 const SECONDARY_SELECTION_BLINK_LOCK_MS =
   BLINK_SEQUENCE_TIMING.maxGapAfterShortMs + BLINK_SYMBOLS.shortMaxMs + BLINK_SYMBOLS.decodeDelayMs + 250;
 const SECONDARY_SELECTION_INTRO_FALLBACK_MS = 7000;
+const SECONDARY_SELECTION_POST_SPEECH_DWELL_MS = 2000;
+const BROW_BLINK_PRIORITY_GUARD_MS = 650;
 
 const ACTION_CONFIG = createActionConfig(currentLanguage);
 const SECONDARY_SELECTION_GROUPS = createSecondarySelectionGroups(currentLanguage);
@@ -1097,6 +1102,7 @@ const state = {
   blinkClosedLastObservedAt: 0,
   blinkWasClosed: false,
   blinkClosureConsumed: false,
+  lastBlinkReleasedAt: 0,
   blinkCodeBuffer: [],
   blinkDecodeTimer: 0,
   blinkCodeOverflow: false,
@@ -2391,8 +2397,7 @@ function finishSecondarySelectionIntro(sessionId) {
   state.secondarySelection.startedAt = now;
   state.secondarySelection.expiresAt = now + SECONDARY_SELECTION_TIMEOUT_MS;
   renderSecondarySelection();
-  speakSecondarySelectionCurrentOption();
-  scheduleSecondarySelectionScan();
+  scheduleSecondarySelectionScanAfterCurrentOption();
 }
 
 function startSecondarySelectionIntro(prompt) {
@@ -2478,7 +2483,7 @@ function shouldSuppressRecentlyConsumedBlinkCode(code, now = performance.now()) 
   return true;
 }
 
-function scheduleSecondarySelectionScan() {
+function scheduleSecondarySelectionScan(delayMs = SECONDARY_SELECTION_SCAN_MS) {
   clearSecondarySelectionTimer();
   if (
     !state.secondarySelection.active ||
@@ -2496,7 +2501,44 @@ function scheduleSecondarySelectionScan() {
     }
 
     advanceSecondarySelection();
-  }, SECONDARY_SELECTION_SCAN_MS);
+  }, Math.max(0, delayMs));
+}
+
+function scheduleSecondarySelectionScanAfterCurrentOption() {
+  clearSecondarySelectionTimer();
+  if (
+    !state.secondarySelection.active ||
+    !isSecondarySelectionScanning() ||
+    state.secondarySelection.lockedIndex !== null
+  ) {
+    return;
+  }
+
+  const sessionId = state.secondarySelection.sessionId;
+  Promise.resolve(speakSecondarySelectionCurrentOption())
+    .then((result = {}) => {
+      if (
+        !state.secondarySelection.active ||
+        !isSecondarySelectionScanning() ||
+        state.secondarySelection.sessionId !== sessionId ||
+        state.secondarySelection.lockedIndex !== null
+      ) {
+        return;
+      }
+
+      const delayMs = result.ok ? SECONDARY_SELECTION_POST_SPEECH_DWELL_MS : SECONDARY_SELECTION_SCAN_MS;
+      scheduleSecondarySelectionScan(delayMs);
+    })
+    .catch(() => {
+      if (
+        state.secondarySelection.active &&
+        isSecondarySelectionScanning() &&
+        state.secondarySelection.sessionId === sessionId &&
+        state.secondarySelection.lockedIndex === null
+      ) {
+        scheduleSecondarySelectionScan(SECONDARY_SELECTION_SCAN_MS);
+      }
+    });
 }
 
 function advanceSecondarySelection() {
@@ -2507,8 +2549,7 @@ function advanceSecondarySelection() {
 
   state.secondarySelection.index = (state.secondarySelection.index + 1) % group.options.length;
   renderSecondarySelection();
-  speakSecondarySelectionCurrentOption();
-  scheduleSecondarySelectionScan();
+  scheduleSecondarySelectionScanAfterCurrentOption();
 }
 
 function clearSecondarySelection({ render = true } = {}) {
@@ -2566,13 +2607,11 @@ function startInputManagementSelection() {
   state.secondarySelection.index = 0;
   state.secondarySelection.startedAt = now;
   state.secondarySelection.expiresAt = now + SECONDARY_SELECTION_TIMEOUT_MS;
-  state.secondarySelection.phase = "scan";
-  renderSecondarySelection();
-  scheduleSecondarySelectionScan();
+  state.secondarySelection.phase = "intro";
 
   const prompt = "输入管理：请选择要开启或关闭的动作。眨眼短码始终开启。";
   setCommunicationMessage(prompt, group.label);
-  speak(prompt);
+  startSecondarySelectionIntro(prompt);
   addLog("进入输入管理");
   return true;
 }
@@ -3190,6 +3229,28 @@ function startMenuActionCooldown(ms = MENU_ACTION_COOLDOWN_MS) {
   state.menuActionCooldownUntil = Math.max(state.menuActionCooldownUntil, performance.now() + ms);
 }
 
+function shouldPrioritizeBlinkOverOrdinaryBrow(
+  now = performance.now(),
+  { isClosed = false, activeSecondary = Boolean(getActiveSecondarySelection(now)), activeConfirmation = Boolean(state.pendingConfirmation) } = {},
+) {
+  if (activeSecondary || activeConfirmation) {
+    return false;
+  }
+
+  const recentlyReleasedBlink =
+    state.lastBlinkReleasedAt > 0 && now - state.lastBlinkReleasedAt <= BROW_BLINK_PRIORITY_GUARD_MS;
+
+  return (
+    isClosed ||
+    !state.blinkArmed ||
+    state.closedFrames > 0 ||
+    state.blinkWasClosed ||
+    state.blinkClosedAt !== null ||
+    state.blinkCodeBuffer.length > 0 ||
+    recentlyReleasedBlink
+  );
+}
+
 function getInteractionMode(now = performance.now()) {
   if (state.quietMode.active) {
     return "QUIET";
@@ -3568,7 +3629,7 @@ function scheduleQuietModeRecoveryTimeout(count) {
   window.clearTimeout(state.quietMode.resumeTimer);
   state.quietMode.resumeTimer = window.setTimeout(
     () => handleQuietModeRecoveryTimeout(count),
-    BLINK_SEQUENCE_TIMING.maxGapAfterShortMs,
+    LONG_CLOSE_CONTROL.resumeMaxGapMs,
   );
 }
 
@@ -3582,8 +3643,8 @@ function handleQuietModeBlinkCandidate(duration, now) {
     return true;
   }
 
-  if (duration < BLINK_SYMBOLS.shortMinMs || duration > BLINK_SYMBOLS.shortMaxMs) {
-    addLog(`安静模式中忽略非短眨 ${Math.round(duration)}ms`);
+  if (duration < LONG_CLOSE_CONTROL.resumeBlinkMinMs || duration > LONG_CLOSE_CONTROL.resumeBlinkMaxMs) {
+    addLog(`安静模式中忽略非恢复短眨 ${Math.round(duration)}ms`);
     return true;
   }
 
@@ -3591,7 +3652,7 @@ function handleQuietModeBlinkCandidate(duration, now) {
   if (
     !state.quietMode.resumeStartedAt ||
     now - state.quietMode.resumeStartedAt > LONG_CLOSE_CONTROL.resumeWindowMs ||
-    gapFromLast > BLINK_SEQUENCE_TIMING.maxGapAfterShortMs
+    gapFromLast > LONG_CLOSE_CONTROL.resumeMaxGapMs
   ) {
     window.clearTimeout(state.quietMode.resumeTimer);
     state.quietMode.resumeTimer = 0;
@@ -5244,6 +5305,15 @@ function handleGestureEvent(event, label) {
     return;
   }
 
+  if (
+    event.name === "BROW_RAISE" &&
+    shouldPrioritizeBlinkOverOrdinaryBrow(performance.now(), { activeSecondary, activeConfirmation })
+  ) {
+    addLog(`${label}候选：近期有眨眼或短码窗口，已让位给眨眼输入`);
+    finishPendingTestRecord({ note: "brow_suppressed_for_blink_priority" });
+    return;
+  }
+
   if (suppressGestureEventForFaceQuality(event, label)) {
     return;
   }
@@ -6185,6 +6255,11 @@ function processFaceSignals(signals, now) {
   const smileLooksActive = smileToggle.checked && detectionSignals.smile >= SMILE_MOUTH_SUPPRESS_THRESHOLD;
   const headMotionSuppressesBrow = isHeadMotionSuppressingBrow(signals, detectionSignals, now);
   const secondarySelectionActive = Boolean(getActiveSecondarySelection(now));
+  const blinkSuppressesOrdinaryBrow = shouldPrioritizeBlinkOverOrdinaryBrow(now, {
+    isClosed,
+    activeSecondary: secondarySelectionActive,
+    activeConfirmation: Boolean(state.pendingConfirmation),
+  });
 
   headShakeDetector.update(detectionSignals.headYaw, now, headShakeToggle.checked);
   const headMotionSuppressesSmile = isHeadMotionSuppressingSmile(now);
@@ -6205,6 +6280,9 @@ function processFaceSignals(signals, now) {
     gestureDetectors.brow.reset();
     gestureDetectors.secondaryBrow.reset();
   } else if (detectionSignals.mouthOpen >= MOUTH_BROW_SUPPRESS_THRESHOLD) {
+    gestureDetectors.brow.reset();
+    gestureDetectors.secondaryBrow.reset();
+  } else if (blinkSuppressesOrdinaryBrow) {
     gestureDetectors.brow.reset();
     gestureDetectors.secondaryBrow.reset();
   } else {
@@ -6228,6 +6306,7 @@ function handleBlinkReleased(now, ear) {
   const wallDuration = blinkStartedAt ? now - blinkStartedAt : 0;
   const duration = state.blinkClosedObservedMs;
   const closureConsumed = state.blinkClosureConsumed;
+  state.lastBlinkReleasedAt = now;
   state.blinkWasClosed = false;
   state.blinkClosedAt = null;
   state.blinkClosedObservedMs = 0;

@@ -8,6 +8,7 @@ import {
   AAC_QUALITY_STATES,
   createAacInputMachine,
 } from "../src/shared/aac-input-machine.js";
+import { GESTURE_DETECTOR_PARAMS } from "../src/shared/gesture-params.js";
 
 const S = AAC_INPUT_EVENTS.SHORT_BLINK;
 const L = AAC_INPUT_EVENTS.LONG_BLINK;
@@ -42,6 +43,13 @@ function actions(commands) {
 function actionIds(commands) {
   return actions(commands).map((item) => item.gestureId);
 }
+
+test("ordinary brow stays stricter than secondary menu brow", () => {
+  assert.equal(GESTURE_DETECTOR_PARAMS.brow.threshold, 0.12);
+  assert.equal(GESTURE_DETECTOR_PARAMS.brow.peakThreshold, 0.17);
+  assert.ok(GESTURE_DETECTOR_PARAMS.brow.threshold > GESTURE_DETECTOR_PARAMS.secondaryBrow.threshold);
+  assert.ok(GESTURE_DETECTOR_PARAMS.brow.peakThreshold > GESTURE_DETECTOR_PARAMS.secondaryBrow.peakThreshold);
+});
 
 test("single short blink is ignored after the prefix window", () => {
   const machine = createMachine();
@@ -302,7 +310,7 @@ test("long-close quiet enters quiet mode and four short blinks recover with reco
   assert.ok(hasCommand(enterCommands, AAC_COMMANDS.ENTER_QUIET));
   assert.equal(machine.snapshot().mode, AAC_INPUT_MODES.QUIET);
 
-  const recoverCommands = run(machine, [S, 150, S, 150, S, 150, S]);
+  const recoverCommands = run(machine, [S, 2000, S, 2000, S, 2000, S]);
 
   assert.ok(hasCommand(recoverCommands, AAC_COMMANDS.EXIT_QUIET));
   assert.equal(machine.snapshot().mode, AAC_INPUT_MODES.RECOVERY_COOLDOWN);
@@ -320,12 +328,16 @@ test("quiet mode three short blinks wait for a fourth, then trigger emergency if
   const machine = createMachine();
   machine.send({ type: AAC_INPUT_EVENTS.LONG_CLOSE_QUIET });
 
-  const pending = run(machine, [S, 150, S, 150, S]);
+  const pending = run(machine, [S, 2000, S, 2000, S]);
 
   assert.deepEqual(actionIds(pending), []);
   assert.equal(machine.snapshot().mode, AAC_INPUT_MODES.QUIET);
 
-  const commands = machine.advance(1300);
+  const stillWaiting = machine.advance(1300);
+  assert.deepEqual(actionIds(stillWaiting), []);
+  assert.equal(machine.snapshot().mode, AAC_INPUT_MODES.QUIET);
+
+  const commands = machine.advance(1800);
 
   assert.deepEqual(actionIds(commands), ["blink_triple_short"]);
   assert.equal(machine.snapshot().mode, AAC_INPUT_MODES.COOLDOWN);
